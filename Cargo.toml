@@ -8,6 +8,7 @@ members = [
     "crates/citadel-consensus",
     "crates/citadel-protocols",
     "crates/citadel-vis",
+    "crates/citadel-wgpu",
     "crates/citadel-cli",
     "crates/citadel-wasm",
     "crates/citadel-logging",
