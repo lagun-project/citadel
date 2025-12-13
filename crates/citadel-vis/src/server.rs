@@ -93,7 +93,10 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRespon
 
 async fn snapshot_handler(State(state): State<Arc<AppState>>) -> Json<MeshSnapshot> {
     let sim = state.simulation.read().await;
-    Json(sim.snapshot())
+    let playback = state.playback.read().await;
+    let events = sim.events();
+    let frame = playback.current_frame();
+    Json(MeshSnapshot::from_events(events, frame))
 }
 
 async fn playback_status_handler(State(state): State<Arc<AppState>>) -> Json<PlaybackStatus> {
@@ -173,9 +176,13 @@ async fn ws_handler(
 }
 
 async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
-    // Send initial state
+    // Send initial state at current playback frame
     let sim = state.simulation.read().await;
-    let snapshot = sim.snapshot();
+    let playback = state.playback.read().await;
+    let events = sim.events();
+    let frame = playback.current_frame();
+    let snapshot = MeshSnapshot::from_events(events, frame);
+    drop(playback);
     drop(sim);
 
     if let Ok(json) = serde_json::to_string(&snapshot) {
@@ -228,7 +235,10 @@ async fn handle_ws_command(state: &Arc<AppState>, cmd: WsCommand) -> WsResponse 
     match cmd {
         WsCommand::GetSnapshot => {
             let sim = state.simulation.read().await;
-            WsResponse::Snapshot(sim.snapshot())
+            let playback = state.playback.read().await;
+            let events = sim.events();
+            let frame = playback.current_frame();
+            WsResponse::Snapshot(MeshSnapshot::from_events(events, frame))
         }
         WsCommand::GetStatus => {
             let playback = state.playback.read().await;

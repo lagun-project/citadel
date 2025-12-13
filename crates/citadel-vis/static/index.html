@@ -176,8 +176,11 @@
         }
 
         #graph-container {
-            width: 100%;
-            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
         }
     </style>
 </head>
@@ -322,33 +325,37 @@
                     graph.d3Force('link').distance(30);
                 }
 
-                // Update graph with new snapshot
+                // Update graph from snapshot - bijective SPIRAL means snapshot IS truth
                 function updateGraph(snapshot) {
                     nodeCount.value = snapshot.node_count;
                     connectionCount.value = snapshot.connections?.length || 0;
                     validCount.value = snapshot.valid_count;
                     frontierRing.value = snapshot.frontier_ring;
 
-                    const nodes = (snapshot.nodes || []).map(n => ({
-                        id: n.id[0] || n.id,
-                        slot: n.slot[0] || n.slot,
-                        coord: n.coord,
-                        connections: n.connections,
-                        is_valid: n.is_valid,
-                        // Position from hex coords
-                        fx: hexTo3D(n.coord).x,
-                        fy: hexTo3D(n.coord).y,
-                        fz: hexTo3D(n.coord, n.coord.z || 0).z,
-                    }));
+                    // Transform snapshot to graph format
+                    const nodes = (snapshot.nodes || []).map(n => {
+                        const id = n.id[0] ?? n.id;
+                        const pos = hexTo3D(n.coord, n.coord.z || 0);
+                        return {
+                            id,
+                            slot: n.slot[0] ?? n.slot,
+                            coord: n.coord,
+                            connections: n.connections,
+                            is_valid: n.is_valid,
+                            fx: pos.x,
+                            fy: pos.y,
+                            fz: pos.z,
+                        };
+                    });
 
                     const links = (snapshot.connections || []).map(c => ({
-                        source: c.from[0] || c.from,
-                        target: c.to[0] || c.to,
+                        source: c.from[0] ?? c.from,
+                        target: c.to[0] ?? c.to,
                     }));
 
-                    graphData.value = { nodes, links };
+                    // 3d-force-graph handles diffing internally via node IDs
                     if (graph) {
-                        graph.graphData(graphData.value);
+                        graph.graphData({ nodes, links });
                     }
                 }
 
@@ -368,10 +375,9 @@
                         if (data.type === 'snapshot') {
                             updateGraph(data);
                         } else if (data.type === 'status') {
-                            currentFrame.value = data.current_frame;
+                            // Only use server status for totalFrames, not play state
+                            // (frontend drives playback now)
                             totalFrames.value = data.total_frames;
-                            isPlaying.value = data.state === 'Playing';
-                            speed.value = data.speed;
                         } else if (data.nodes) {
                             // Direct snapshot
                             updateGraph(data);
@@ -384,58 +390,90 @@
                     };
                 }
 
+                // Animation loop for playback
+                let animationInterval = null;
+                const speedMs = {
+                    'HalfSpeed': 200,
+                    'Normal': 100,
+                    'Double': 50,
+                    'Quadruple': 25,
+                    'TenX': 10,
+                };
+
+                function startAnimation() {
+                    if (animationInterval) return;
+
+                    animationInterval = setInterval(() => {
+                        if (!isPlaying.value) {
+                            stopAnimation();
+                            return;
+                        }
+
+                        if (currentFrame.value < totalFrames.value) {
+                            currentFrame.value++;
+                            ws?.send(JSON.stringify({ type: 'seek', frame: currentFrame.value }));
+                            ws?.send(JSON.stringify({ type: 'get_snapshot' }));
+                        } else {
+                            isPlaying.value = false;
+                            stopAnimation();
+                        }
+                    }, speedMs[speed.value] || 100);
+                }
+
+                function stopAnimation() {
+                    if (animationInterval) {
+                        clearInterval(animationInterval);
+                        animationInterval = null;
+                    }
+                }
+
                 // Playback controls
                 function togglePlay() {
-                    if (isPlaying.value) {
-                        ws?.send(JSON.stringify({ type: 'pause' }));
-                    } else {
-                        ws?.send(JSON.stringify({ type: 'play' }));
-                    }
                     isPlaying.value = !isPlaying.value;
+                    if (isPlaying.value) {
+                        startAnimation();
+                    } else {
+                        stopAnimation();
+                    }
                 }
 
                 function stop() {
-                    fetch('/api/playback/stop', { method: 'POST' })
-                        .then(r => r.json())
-                        .then(updatePlaybackStatus);
+                    stopAnimation();
+                    isPlaying.value = false;
+                    currentFrame.value = 0;
+                    ws?.send(JSON.stringify({ type: 'seek', frame: 0 }));
+                    ws?.send(JSON.stringify({ type: 'get_snapshot' }));
                 }
 
                 function seek(frame) {
-                    ws?.send(JSON.stringify({ type: 'seek', frame: parseInt(frame) }));
+                    currentFrame.value = parseInt(frame);
+                    ws?.send(JSON.stringify({ type: 'seek', frame: currentFrame.value }));
+                    ws?.send(JSON.stringify({ type: 'get_snapshot' }));
                 }
 
                 function stepForward() {
-                    fetch('/api/playback/step', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ direction: 'forward' })
-                    }).then(r => r.json()).then(updatePlaybackStatus);
+                    if (currentFrame.value < totalFrames.value) {
+                        currentFrame.value++;
+                        ws?.send(JSON.stringify({ type: 'seek', frame: currentFrame.value }));
+                        ws?.send(JSON.stringify({ type: 'get_snapshot' }));
+                    }
                 }
 
                 function stepBack() {
-                    fetch('/api/playback/step', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ direction: 'backward' })
-                    }).then(r => r.json()).then(updatePlaybackStatus);
+                    if (currentFrame.value > 0) {
+                        currentFrame.value--;
+                        ws?.send(JSON.stringify({ type: 'seek', frame: currentFrame.value }));
+                        ws?.send(JSON.stringify({ type: 'get_snapshot' }));
+                    }
                 }
 
                 function setSpeed(newSpeed) {
-                    fetch('/api/playback/speed', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ speed: newSpeed })
-                    }).then(r => r.json()).then(updatePlaybackStatus);
-                }
-
-                function updatePlaybackStatus(status) {
-                    currentFrame.value = status.current_frame;
-                    totalFrames.value = status.total_frames;
-                    isPlaying.value = status.state === 'Playing';
-                    speed.value = status.speed;
-
-                    // Refresh snapshot at new frame
-                    ws?.send(JSON.stringify({ type: 'get_snapshot' }));
+                    speed.value = newSpeed;
+                    // Restart interval with new speed if playing
+                    if (isPlaying.value && animationInterval) {
+                        stopAnimation();
+                        startAnimation();
+                    }
                 }
 
                 onMounted(() => {

@@ -1,8 +1,10 @@
 //! Mesh assembly simulation with event recording.
+//!
+//! Uses the 3D SPIRAL enumeration for true 20-neighbor mesh assembly.
 
 use std::collections::HashMap;
 
-use citadel_topology::{HexCoord, SpiralIndex, spiral_to_coord, Neighbors};
+use citadel_topology::{HexCoord, Spiral3DIndex, spiral3d_to_coord, Neighbors};
 use citadel_consensus::validation_threshold;
 
 use crate::events::{MeshEvent, NodeId, NodeState, ConnectionState, MeshSnapshot};
@@ -33,10 +35,11 @@ pub struct Simulation {
     config: SimulationConfig,
     events: Vec<MeshEvent>,
     nodes: HashMap<NodeId, NodeState>,
-    slot_to_node: HashMap<SpiralIndex, NodeId>,
+    slot_to_node: HashMap<Spiral3DIndex, NodeId>,
+    coord_to_node: HashMap<HexCoord, NodeId>,
     next_node_id: u64,
     current_frame: u64,
-    frontier: SpiralIndex,
+    frontier: Spiral3DIndex,
 }
 
 impl Simulation {
@@ -47,74 +50,73 @@ impl Simulation {
             events: Vec::new(),
             nodes: HashMap::new(),
             slot_to_node: HashMap::new(),
+            coord_to_node: HashMap::new(),
             next_node_id: 0,
             current_frame: 0,
-            frontier: SpiralIndex::new(0),
+            frontier: Spiral3DIndex::new(0),
         }
     }
 
-    /// Add a node to the mesh using SPIRAL self-assembly.
+    /// Add a node to the mesh using 3D SPIRAL self-assembly.
+    ///
+    /// The 3D spiral enumerates coordinates in shells of increasing radius,
+    /// ensuring each new node connects to its 20 neighbors as they exist.
     pub fn add_node(&mut self) -> NodeId {
         let node_id = NodeId(self.next_node_id);
         self.next_node_id += 1;
 
-        // Find next available slot
+        // Find next available slot in 3D spiral
         let slot = self.find_next_slot();
-        let coord = spiral_to_coord(slot);
+        let coord = spiral3d_to_coord(slot);
 
         // Record join event
         self.events.push(MeshEvent::NodeJoined {
             node: node_id,
-            slot,
+            slot: citadel_topology::SpiralIndex::new(slot.value()), // Convert for compatibility
             coord,
             frame: self.current_frame,
         });
 
-        // Create node state
-        let node_state = NodeState {
-            id: node_id,
-            slot,
-            coord,
-            connections: Vec::new(),
-            is_valid: false,
-        };
+        // Get all 20 neighbor coordinates
+        let neighbor_coords = Neighbors::of(coord);
+        let mut connections = Vec::new();
 
         // Establish connections to existing neighbors
-        let neighbor_coords = Neighbors::of(coord);
-        let mut connection_count = 0;
-
         for neighbor_coord in neighbor_coords {
-            // Find node at this neighbor position (if any)
-            if let Some(&neighbor_id) = self.find_node_at_coord(neighbor_coord) {
+            if let Some(&neighbor_id) = self.coord_to_node.get(&neighbor_coord) {
                 // Establish connection
                 self.events.push(MeshEvent::ConnectionEstablished {
                     from: node_id,
                     to: neighbor_id,
-                    direction: 0, // Simplified - would compute actual direction
+                    direction: 0,
                     frame: self.current_frame,
                 });
 
-                // Mark as bidirectional (simplified - in real impl, neighbor confirms)
+                // Confirm bidirectional
                 self.events.push(MeshEvent::ConnectionConfirmed {
                     from: node_id,
                     to: neighbor_id,
                     frame: self.current_frame,
                 });
 
-                connection_count += 1;
+                connections.push(neighbor_id);
 
-                // Update both nodes' connection lists
+                // Update neighbor's connection list
                 if let Some(neighbor) = self.nodes.get_mut(&neighbor_id) {
-                    neighbor.connections.push(node_id);
+                    if !neighbor.connections.contains(&node_id) {
+                        neighbor.connections.push(node_id);
+                    }
                 }
             }
         }
 
-        // Check if node is now valid
-        let existing_neighbors = connection_count;
-        let threshold = validation_threshold(existing_neighbors);
+        let connection_count = connections.len();
 
-        if connection_count >= threshold {
+        // Check validation threshold
+        let threshold = validation_threshold(connection_count);
+        let is_valid = connection_count >= threshold;
+
+        if is_valid {
             self.events.push(MeshEvent::NodeValidated {
                 node: node_id,
                 connection_count,
@@ -123,37 +125,32 @@ impl Simulation {
             });
         }
 
-        // Store node
-        let mut final_state = node_state;
-        final_state.is_valid = connection_count >= threshold;
-        final_state.connections = self.nodes.values()
-            .filter(|n| neighbor_coords.contains(&n.coord))
-            .map(|n| n.id)
-            .collect();
+        // Create and store node state
+        let node_state = NodeState {
+            id: node_id,
+            slot: citadel_topology::SpiralIndex::new(slot.value()),
+            coord,
+            connections,
+            is_valid,
+        };
 
-        self.nodes.insert(node_id, final_state);
+        self.nodes.insert(node_id, node_state);
         self.slot_to_node.insert(slot, node_id);
+        self.coord_to_node.insert(coord, node_id);
 
-        // Update frontier if needed
+        // Update frontier
         if slot.value() >= self.frontier.value() {
-            self.frontier = SpiralIndex::new(slot.value() + 1);
+            self.frontier = Spiral3DIndex::new(slot.value() + 1);
         }
 
         self.current_frame += 1;
         node_id
     }
 
-    /// Find the next available slot in SPIRAL order.
-    fn find_next_slot(&self) -> SpiralIndex {
-        // Simple: just use next in sequence (no gaps for now)
-        SpiralIndex::new(self.nodes.len() as u64)
-    }
-
-    /// Find a node at the given coordinate.
-    fn find_node_at_coord(&self, coord: HexCoord) -> Option<&NodeId> {
-        self.nodes.values()
-            .find(|n| n.coord == coord)
-            .map(|n| &n.id)
+    /// Find the next available slot in 3D SPIRAL order.
+    fn find_next_slot(&self) -> Spiral3DIndex {
+        // Use next in sequence
+        Spiral3DIndex::new(self.nodes.len() as u64)
     }
 
     /// Get all recorded events.
@@ -186,7 +183,7 @@ impl Simulation {
             .collect();
 
         let valid_count = nodes.iter().filter(|n| n.is_valid).count();
-        let frontier_ring = self.frontier.ring();
+        let frontier_shell = self.frontier.shell();
 
         MeshSnapshot {
             frame: self.current_frame,
@@ -194,7 +191,7 @@ impl Simulation {
             connections,
             node_count: self.nodes.len(),
             valid_count,
-            frontier_ring,
+            frontier_ring: frontier_shell,
         }
     }
 
@@ -209,6 +206,7 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use citadel_topology::SpiralIndex;
 
     #[test]
     fn simulation_starts_empty() {
@@ -225,7 +223,7 @@ mod tests {
         assert_eq!(node, NodeId(0));
         assert_eq!(sim.node_count(), 1);
 
-        // First node should be at origin
+        // First node should be at origin (slot 0 in both 2D and 3D spiral)
         let state = sim.nodes.get(&node).unwrap();
         assert_eq!(state.slot, SpiralIndex::new(0));
         assert_eq!(state.coord, HexCoord::ORIGIN);
