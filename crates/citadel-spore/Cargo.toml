@@ -1,0 +1,6 @@
+[package]
+name = "citadel-spore"
+version.workspace = true
+edition = "2021"
+
+[dependencies]

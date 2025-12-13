@@ -1,0 +1,15 @@
+[package]
+name = "citadel-consensus"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Convergent self-assembly consensus for Citadel mesh"
+
+[dependencies]
+citadel-topology = { path = "../citadel-topology" }
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1"

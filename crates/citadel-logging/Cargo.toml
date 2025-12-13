@@ -1,0 +1,6 @@
+[package]
+name = "citadel-logging"
+version.workspace = true
+edition = "2021"
+
+[dependencies]

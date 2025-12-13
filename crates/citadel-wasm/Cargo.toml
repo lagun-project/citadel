@@ -1,0 +1,6 @@
+[package]
+name = "citadel-wasm"
+version.workspace = true
+edition = "2021"
+
+[dependencies]

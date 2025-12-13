@@ -1,0 +1,19 @@
+[package]
+name = "citadel-topology"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hexagonal mesh topology with 20-connection invariant and SPIRAL self-assembly"
+
+[dependencies]
+thiserror.workspace = true
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[features]
+default = []
+serde = ["dep:serde"]
