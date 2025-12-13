@@ -42,7 +42,7 @@ def origin : HexCoord := make 0 0 0
 theorem s_eq_neg_q_r (h : HexCoord) : h.s = -h.q - h.r := rfl
 
 theorem cube_constraint (h : HexCoord) : h.q + h.r + h.s = 0 := by
-  simp [s]
+  simp only [s]
   ring
 
 /-- Planar hexagonal distance between two coordinates (ignoring z) -/
@@ -92,9 +92,7 @@ theorem extendedNeighbors_length (h : HexCoord) :
 theorem allConnections_length (h : HexCoord) :
   (allConnections h).length = 20 := by
   unfold allConnections
-  rw [planarNeighbors_length, verticalNeighbors_length, extendedNeighbors_length]
-  simp [List.length_append]
-  norm_num
+  simp only [List.length_append, planarNeighbors_length, verticalNeighbors_length, extendedNeighbors_length]
 
 -- Metric space properties
 
@@ -109,8 +107,11 @@ theorem distance_self (a : HexCoord) : distance a a = 0 := by
 /-- Symmetry: distance is symmetric -/
 theorem distance_symm (a b : HexCoord) : distance a b = distance b a := by
   unfold distance s
-  simp only [Int.natAbs_sub_comm]
-  ring_nf
+  congr 1
+  · congr 1
+    · exact Int.natAbs_sub_comm a.q b.q
+    · exact Int.natAbs_sub_comm a.r b.r
+  · exact Int.natAbs_sub_comm (-a.q - a.r) (-b.q - b.r)
 
 /-- Distance to planar neighbors is 1 -/
 theorem distance_to_planar_neighbor (h : HexCoord) (n : HexCoord) :
@@ -137,16 +138,15 @@ theorem distance_triangle (a b c : HexCoord) :
 theorem planarNeighbors_distinct (h : HexCoord) :
   (planarNeighbors h).Nodup := by
   unfold planarNeighbors
-  simp only [List.nodup_cons, List.mem_cons, List.mem_singleton, List.not_mem_nil, not_false_eq_true, and_true]
-  simp only [make, HexCoord.mk.injEq, and_true]
-  omega
+  decide
 
 /-- Vertical neighbors are distinct -/
 theorem verticalNeighbors_distinct (h : HexCoord) :
   (verticalNeighbors h).Nodup := by
   unfold verticalNeighbors
-  simp only [List.nodup_cons, List.mem_singleton, List.not_mem_nil, not_false_eq_true, and_true]
-  simp only [make, HexCoord.mk.injEq]
+  simp only [List.nodup_cons, List.mem_singleton, List.not_mem_nil, and_self, make]
+  simp only [HexCoord.mk.injEq, not_and, not_true_eq_false, implies_true, and_true]
+  intro _ _
   omega
 
 -- Connection invariants
