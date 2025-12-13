@@ -156,8 +156,7 @@ theorem planarNeighbors_same_z (h : HexCoord) (n : HexCoord) :
   intro hn
   unfold planarNeighbors at hn
   simp [mk] at hn
-  rcases hn with h1 | h2 | h3 | h4 | h5 | h6
-  all_goals { simp [h1, h2, h3, h4, h5, h6] }
+  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl
 
 /-- Vertical neighbors differ by exactly 1 in z-coordinate -/
 theorem verticalNeighbors_z_diff (h : HexCoord) (n : HexCoord) :
@@ -165,22 +164,22 @@ theorem verticalNeighbors_z_diff (h : HexCoord) (n : HexCoord) :
   intro hn
   unfold verticalNeighbors at hn
   simp [mk] at hn
-  rcases hn with h1 | h2
-  · simp [h1]; norm_num
-  · simp [h2]; norm_num
+  rcases hn with rfl | rfl <;> simp
 
 /-- Extended neighbors differ by exactly 1 in z-coordinate -/
 theorem extendedNeighbors_z_diff (h : HexCoord) (n : HexCoord) :
   n ∈ extendedNeighbors h → Int.natAbs (n.z - h.z) = 1 := by
   intro hn
   unfold extendedNeighbors at hn
-  simp [List.mem_append] at hn
-  rcases hn with ⟨_, hplanar⟩ | ⟨_, hplanar⟩
-  · have : (mk h.q h.r (h.z + 1)).z = h.z + 1 := rfl
-    simp [planarNeighbors_same_z, this]
-    norm_num
-  · have : (mk h.q h.r (h.z - 1)).z = h.z - 1 := rfl
-    simp [planarNeighbors_same_z, this]
-    norm_num
+  simp only [List.mem_append] at hn
+  rcases hn with hup | hdown
+  · -- n is a planar neighbor of the cell above h
+    have hz : n.z = (mk h.q h.r (h.z + 1)).z := planarNeighbors_same_z _ _ hup
+    simp only [mk] at hz
+    simp [hz]
+  · -- n is a planar neighbor of the cell below h
+    have hz : n.z = (mk h.q h.r (h.z - 1)).z := planarNeighbors_same_z _ _ hdown
+    simp only [mk] at hz
+    simp [hz]
 
 end HexCoord

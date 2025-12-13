@@ -35,19 +35,13 @@ def totalThroughShell (n : Nat) : Nat :=
 theorem shell_zero_size : shellSize 0 = 1 := by simp [shellSize]
 
 /-- Shell 1 contains exactly 20 slots (the 20 neighbors of origin) -/
-theorem shell_one_size : shellSize 1 = 20 := by
-  simp [shellSize]
-  norm_num
+theorem shell_one_size : shellSize 1 = 20 := by simp [shellSize]
 
 /-- Shell 2 contains exactly 74 slots -/
-theorem shell_two_size : shellSize 2 = 74 := by
-  simp [shellSize]
-  norm_num
+theorem shell_two_size : shellSize 2 = 74 := by simp [shellSize]
 
 /-- Shell 3 contains exactly 164 slots -/
-theorem shell_three_size : shellSize 3 = 164 := by
-  simp [shellSize]
-  norm_num
+theorem shell_three_size : shellSize 3 = 164 := by simp [shellSize]
 
 /-- The shell size formula: 18n² + 2 for n > 0 -/
 theorem shell_size_formula (n : Nat) (hn : n > 0) :
@@ -60,19 +54,13 @@ theorem total_through_zero : totalThroughShell 0 = 1 := by
   simp [totalThroughShell]
 
 /-- Total through shell 1 is 21 (1 + 20) -/
-theorem total_through_one : totalThroughShell 1 = 21 := by
-  simp [totalThroughShell]
-  norm_num
+theorem total_through_one : totalThroughShell 1 = 21 := by simp [totalThroughShell]
 
 /-- Total through shell 2 is 95 (1 + 20 + 74) -/
-theorem total_through_two : totalThroughShell 2 = 95 := by
-  simp [totalThroughShell]
-  norm_num
+theorem total_through_two : totalThroughShell 2 = 95 := by simp [totalThroughShell]
 
 /-- Total through shell 3 is 259 (1 + 20 + 74 + 164) -/
-theorem total_through_three : totalThroughShell 3 = 259 := by
-  simp [totalThroughShell]
-  norm_num
+theorem total_through_three : totalThroughShell 3 = 259 := by simp [totalThroughShell]
 
 /-- The cumulative formula matches the sum of shell sizes -/
 theorem cumulative_formula (n : Nat) :
@@ -91,7 +79,9 @@ theorem cumulative_formula (n : Nat) :
 /-- Shell n > 0 has more slots than shell 0 -/
 theorem shell_monotonic (n : Nat) (hn : n > 0) :
     shellSize n > shellSize 0 := by
-  simp [shellSize, hn]
+  simp only [shellSize]
+  have h : n ≠ 0 := Nat.pos_iff_ne_zero.mp hn
+  simp only [h, ↓reduceIte]
   omega
 
 /-- The total grows cubically: O(n³) -/
@@ -100,17 +90,17 @@ theorem total_cubic_growth (n : Nat) :
   simp [totalThroughShell]
   omega
 
-/-- Diameter is O(n^(1/3)) for n nodes -/
+-- Diameter is O(n^(1/3)) for n nodes
 -- For n nodes, they fit in shells 0..k where total(k) ≥ n
 -- Since total(k) = O(k³), we have k = O(n^(1/3))
 
-/-- Every shell contains the 20-neighbor invariant locally -/
+-- Every shell contains the 20-neighbor invariant locally
 -- Shell 1 = exactly the 20 neighbors of the origin
 -- This proves the self-similar structure: the local pattern matches global
 
 theorem shell_one_is_neighbors : shellSize 1 = 20 := shell_one_size
 
-/-- The mesh IS consensus: position proven by geometry + signatures -/
+-- The mesh IS consensus: position proven by geometry + signatures
 -- No timing, no FWW, just:
 -- 1. Deterministic SPIRAL index
 -- 2. 20-neighbor topology
