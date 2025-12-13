@@ -278,7 +278,7 @@ theorem byzantine_tolerance (state : ConnectionState) (slot : Slot)
     -- honest can occupy if legitimately there
     -- malicious cannot fake occupancy with only 6 corrupt witnesses
     True := by
-  trivial
+  intros; trivial
 
 /-══════════════════════════════════════════════════════════════════════════════
   PART 8: DETERMINISTIC SELECTION (NO FWW)
@@ -398,7 +398,7 @@ theorem locked_is_stable (locked : LockedOccupancy) (epoch : Nat)
       contenderScore b.neighbor b.port locked.node epoch →
     -- Locked node keeps all its ports
     True := by
-  trivial
+  intros; trivial
 
 /-══════════════════════════════════════════════════════════════════════════════
   SUMMARY: TOPOLOGY-FIRST SELF-ASSEMBLY
