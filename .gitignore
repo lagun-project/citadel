@@ -3,6 +3,7 @@ synthesis/
 CLAUDE.local.md
 .claude
 .palace
+.mcp.json
 
 # Lean
 **/.lake/**

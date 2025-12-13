@@ -2,5 +2,26 @@
 name = "citadel-vis"
 version.workspace = true
 edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Real-time mesh visualization with Vue.js frontend and playback controls"
 
 [dependencies]
+citadel-topology = { path = "../citadel-topology", features = ["serde"] }
+citadel-consensus = { path = "../citadel-consensus" }
+
+# Web server
+axum = { version = "0.8", features = ["ws"] }
+tokio.workspace = true
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Logging
+tracing.workspace = true
+
+[dev-dependencies]
+tokio-test = "0.4"
