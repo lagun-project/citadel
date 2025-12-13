@@ -2,6 +2,7 @@
 
 use crate::camera::FlyCamera;
 use crate::mesh_data::MeshData;
+use crate::traffic::LineVertex;
 use glam::Mat4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
@@ -20,14 +21,27 @@ struct CameraUniform {
 /// Main renderer state.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
 
-    render_pipeline: wgpu::RenderPipeline,
+    // Point rendering
+    point_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    #[allow(dead_code)] // Retained for future egui integration
+    bind_group_layout: wgpu::BindGroupLayout,
+
+    // Line rendering for traffic
+    line_pipeline: wgpu::RenderPipeline,
+    line_buffer: Option<wgpu::Buffer>,
+    line_vertex_count: u32,
+
+    // Point rendering for traffic packet heads
+    traffic_point_pipeline: wgpu::RenderPipeline,
+    traffic_point_buffer: Option<wgpu::Buffer>,
+    traffic_point_count: u32,
 
     depth_texture: wgpu::TextureView,
 
@@ -140,31 +154,30 @@ impl Renderer {
             }],
         });
 
-        // Create shader module
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Point Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/point.wgsl").into()),
-        });
-
-        // Create render pipeline layout
+        // Create pipeline layout (shared between point and line pipelines)
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        // Create render pipeline
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        // Create point shader and pipeline
+        let point_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Point Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/point.wgsl").into()),
+        });
+
+        let point_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Point Render Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &point_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[MeshData::instance_buffer_layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &point_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -198,19 +211,121 @@ impl Renderer {
             cache: None,
         });
 
+        // Create line shader and pipeline
+        let line_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Line Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/line.wgsl").into()),
+        });
+
+        let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Line Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &line_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[LineVertex::buffer_layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &line_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false, // Lines render on top
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // Create traffic point pipeline (same as point shader but using LineVertex layout)
+        let traffic_point_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Traffic Point Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &point_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[LineVertex::buffer_layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &point_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::PointList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false, // Traffic points render on top
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         Self {
             surface,
             device,
             queue,
             config,
             size,
-            render_pipeline,
+            point_pipeline,
             camera_buffer,
             camera_bind_group,
+            bind_group_layout,
+            line_pipeline,
+            line_buffer: None,
+            line_vertex_count: 0,
+            traffic_point_pipeline,
+            traffic_point_buffer: None,
+            traffic_point_count: 0,
             depth_texture,
             mesh_data: None,
             camera: FlyCamera::default(),
-            point_size: 2.0,
+            point_size: 4.0,
         }
     }
 
@@ -249,6 +364,59 @@ impl Renderer {
             self.surface.configure(&self.device, &self.config);
             self.depth_texture = Self::create_depth_texture(&self.device, &self.config);
         }
+    }
+
+    /// Update line buffer with traffic vertices.
+    pub fn update_lines(&mut self, vertices: &[LineVertex]) {
+        if vertices.is_empty() {
+            self.line_buffer = None;
+            self.line_vertex_count = 0;
+            return;
+        }
+
+        // Create or recreate buffer if needed
+        let buffer_size = (vertices.len() * std::mem::size_of::<LineVertex>()) as u64;
+        let needs_new_buffer = self.line_buffer.as_ref().map_or(true, |b| b.size() < buffer_size);
+
+        if needs_new_buffer {
+            self.line_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Line Vertex Buffer"),
+                size: buffer_size.max(1024 * 1024), // At least 1MB
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+
+        if let Some(buffer) = &self.line_buffer {
+            self.queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
+        }
+        self.line_vertex_count = vertices.len() as u32;
+    }
+
+    /// Update traffic point buffer with packet head vertices.
+    pub fn update_traffic_points(&mut self, vertices: &[LineVertex]) {
+        if vertices.is_empty() {
+            self.traffic_point_buffer = None;
+            self.traffic_point_count = 0;
+            return;
+        }
+
+        let buffer_size = (vertices.len() * std::mem::size_of::<LineVertex>()) as u64;
+        let needs_new_buffer = self.traffic_point_buffer.as_ref().map_or(true, |b| b.size() < buffer_size);
+
+        if needs_new_buffer {
+            self.traffic_point_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Traffic Point Buffer"),
+                size: buffer_size.max(512 * 1024), // At least 512KB
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+
+        if let Some(buffer) = &self.traffic_point_buffer {
+            self.queue.write_buffer(buffer, 0, bytemuck::cast_slice(vertices));
+        }
+        self.traffic_point_count = vertices.len() as u32;
     }
 
     /// Render a frame.
@@ -303,12 +471,33 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
+            // Render points (nodes)
+            render_pass.set_pipeline(&self.point_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
             if let Some(mesh) = &self.mesh_data {
                 render_pass.set_vertex_buffer(0, mesh.instance_buffer.slice(..));
                 render_pass.draw(0..1, 0..mesh.visible_count);
+            }
+
+            // Render lines (traffic trails)
+            if self.line_vertex_count > 0 {
+                if let Some(line_buffer) = &self.line_buffer {
+                    render_pass.set_pipeline(&self.line_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, line_buffer.slice(..));
+                    render_pass.draw(0..self.line_vertex_count, 0..1);
+                }
+            }
+
+            // Render traffic points (packet heads)
+            if self.traffic_point_count > 0 {
+                if let Some(point_buffer) = &self.traffic_point_buffer {
+                    render_pass.set_pipeline(&self.traffic_point_pipeline);
+                    render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    render_pass.set_vertex_buffer(0, point_buffer.slice(..));
+                    render_pass.draw(0..self.traffic_point_count, 0..1);
+                }
             }
         }
 
@@ -321,5 +510,10 @@ impl Renderer {
     /// Get current window size.
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
         self.size
+    }
+
+    /// Get surface format for egui.
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
     }
 }

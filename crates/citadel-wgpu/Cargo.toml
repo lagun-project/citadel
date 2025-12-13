@@ -25,6 +25,8 @@ citadel-topology = { path = "../citadel-topology" }
 # Gamepad
 gilrs = "0.11"
 
+# Stats will be logged to console (egui requires matching wgpu version)
+
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
