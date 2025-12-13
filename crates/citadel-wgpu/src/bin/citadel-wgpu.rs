@@ -198,6 +198,38 @@ impl App {
                         renderer.camera.speed /= 1.5;
                         tracing::info!("Speed: {:.0}", renderer.camera.speed);
                     }
+                    // L3 - single broadcast per second while held
+                    Button::LeftThumb => {
+                        self.l3_held = true;
+                        self.single_shot_timer = 1.0; // Fire immediately
+                    }
+                    // R3 - single unicast per second while held
+                    Button::RightThumb => {
+                        self.r3_held = true;
+                        self.single_shot_timer = 1.0; // Fire immediately
+                    }
+                    // L4/R4 (C/Z or Unknown buttons) - toggle continuous modes
+                    Button::C => {
+                        self.continuous_broadcast = !self.continuous_broadcast;
+                        tracing::info!("Continuous broadcast: {}", if self.continuous_broadcast { "ON" } else { "OFF" });
+                    }
+                    Button::Z => {
+                        self.continuous_unicast = !self.continuous_unicast;
+                        tracing::info!("Continuous unicast: {}", if self.continuous_unicast { "ON" } else { "OFF" });
+                    }
+                    // Also try Unknown buttons for L4/R4
+                    Button::Unknown => {
+                        tracing::debug!("Unknown button pressed");
+                    }
+                    _ => {}
+                },
+                gilrs::EventType::ButtonReleased(btn, _) => match btn {
+                    Button::LeftThumb => {
+                        self.l3_held = false;
+                    }
+                    Button::RightThumb => {
+                        self.r3_held = false;
+                    }
                     _ => {}
                 },
                 _ => {}
@@ -473,8 +505,16 @@ impl ApplicationHandler for App {
                         }
                     }
 
+                    // Get visible node count for traffic bounds
+                    let visible_nodes = renderer.mesh_data.as_ref()
+                        .map(|m| m.visible_count)
+                        .unwrap_or(0);
+
                     // Update traffic
                     if let Some(traffic) = &mut self.traffic {
+                        // Set visible node limit so packets only go between existing nodes
+                        traffic.set_visible_nodes(visible_nodes);
+
                         // Spawn traffic based on trigger intensity
                         // Scale by intensity directly - spawn_unicast/broadcast handle packet counts
                         if self.unicast_intensity > 0.01 {
@@ -482,6 +522,24 @@ impl ApplicationHandler for App {
                         }
                         if self.broadcast_intensity > 0.01 {
                             traffic.spawn_broadcast(self.broadcast_intensity);
+                        }
+
+                        // Single-shot timer for L3/R3 and continuous modes
+                        self.single_shot_timer += dt;
+                        let should_fire = self.single_shot_timer >= 1.0;
+
+                        if should_fire {
+                            self.single_shot_timer = 0.0;
+
+                            // L3 held or continuous broadcast: single broadcast
+                            if self.l3_held || self.continuous_broadcast {
+                                traffic.spawn_single_broadcast();
+                            }
+
+                            // R3 held or continuous unicast: single unicast
+                            if self.r3_held || self.continuous_unicast {
+                                traffic.spawn_single_unicast();
+                            }
                         }
 
                         // Update packet positions
@@ -566,6 +624,10 @@ fn main() {
     tracing::info!("  Right stick - Look");
     tracing::info!("  LT - Unicast traffic (intensity by pressure)");
     tracing::info!("  RT - Broadcast traffic (intensity by pressure)");
+    tracing::info!("  L3 (hold) - Single broadcast per second");
+    tracing::info!("  R3 (hold) - Single unicast per second");
+    tracing::info!("  L4/C - Toggle continuous broadcast");
+    tracing::info!("  R4/Z - Toggle continuous unicast");
     tracing::info!("  A/Start - Toggle playback");
     tracing::info!("  B/Back - Reset playback");
     tracing::info!("  LB/RB - Playback speed");

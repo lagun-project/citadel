@@ -64,6 +64,8 @@ impl Packet {
 pub struct TrafficSimulation {
     /// All node positions (cached for fast lookup)
     node_positions: Vec<[f32; 3]>,
+    /// Number of currently visible/active nodes (traffic only between these)
+    visible_nodes: u32,
     /// Active packets in flight
     pub packets: Vec<Packet>,
     /// Speed of packet travel (progress per second)
@@ -96,12 +98,18 @@ impl TrafficSimulation {
             .collect();
 
         Self {
+            visible_nodes: node_count,
             node_positions,
             packets: Vec::with_capacity(10000),
             packet_speed: 2.0, // Takes 0.5 seconds to traverse
             stats: TrafficStats::default(),
             rng_state: 12345,
         }
+    }
+
+    /// Set the number of visible nodes (traffic only goes between visible nodes).
+    pub fn set_visible_nodes(&mut self, count: u32) {
+        self.visible_nodes = count.min(self.node_positions.len() as u32);
     }
 
     /// Simple random number generator.
@@ -111,15 +119,18 @@ impl TrafficSimulation {
         self.rng_state
     }
 
-    /// Get a random node index.
+    /// Get a random visible node index.
     fn random_node(&mut self) -> usize {
-        (self.rand() as usize) % self.node_positions.len()
+        if self.visible_nodes == 0 {
+            return 0;
+        }
+        (self.rand() as usize) % (self.visible_nodes as usize)
     }
 
     /// Spawn random unicast traffic.
     /// `intensity` is 0.0 to 1.0, controls how many packets to spawn.
     pub fn spawn_unicast(&mut self, intensity: f32) {
-        if self.node_positions.len() < 2 {
+        if self.visible_nodes < 2 {
             return;
         }
 
@@ -147,10 +158,33 @@ impl TrafficSimulation {
         }
     }
 
+    /// Spawn a single unicast packet from a random node to another random node.
+    pub fn spawn_single_unicast(&mut self) {
+        if self.visible_nodes < 2 {
+            return;
+        }
+
+        let src_idx = self.random_node();
+        let mut dst_idx = self.random_node();
+        while dst_idx == src_idx {
+            dst_idx = self.random_node();
+        }
+
+        let packet = Packet::new(
+            self.node_positions[src_idx],
+            self.node_positions[dst_idx],
+            PacketType::Unicast,
+        );
+
+        self.packets.push(packet);
+        self.stats.packets_sent += 1;
+        self.stats.unicast_sent += 1;
+    }
+
     /// Spawn broadcast traffic from random nodes.
     /// `intensity` is 0.0 to 1.0, controls how many broadcasts to spawn.
     pub fn spawn_broadcast(&mut self, intensity: f32) {
-        if self.node_positions.len() < 2 {
+        if self.visible_nodes < 2 {
             return;
         }
 
@@ -163,7 +197,7 @@ impl TrafficSimulation {
 
             // Get neighbors for this node (simulate 20-neighbor topology)
             // For simplicity, pick 20 random nearby nodes
-            let neighbor_count = 20.min(self.node_positions.len() - 1);
+            let neighbor_count = 20.min(self.visible_nodes as usize - 1);
 
             for _ in 0..neighbor_count {
                 let dst_idx = self.random_node();
@@ -178,6 +212,34 @@ impl TrafficSimulation {
                     self.stats.packets_sent += 1;
                     self.stats.broadcast_sent += 1;
                 }
+            }
+        }
+    }
+
+    /// Spawn a single broadcast from one random node to its neighbors.
+    pub fn spawn_single_broadcast(&mut self) {
+        if self.visible_nodes < 2 {
+            return;
+        }
+
+        let src_idx = self.random_node();
+        let src_pos = self.node_positions[src_idx];
+
+        // Broadcast to up to 20 neighbors
+        let neighbor_count = 20.min(self.visible_nodes as usize - 1);
+
+        for _ in 0..neighbor_count {
+            let dst_idx = self.random_node();
+            if dst_idx != src_idx {
+                let packet = Packet::new(
+                    src_pos,
+                    self.node_positions[dst_idx],
+                    PacketType::Broadcast,
+                );
+
+                self.packets.push(packet);
+                self.stats.packets_sent += 1;
+                self.stats.broadcast_sent += 1;
             }
         }
     }
