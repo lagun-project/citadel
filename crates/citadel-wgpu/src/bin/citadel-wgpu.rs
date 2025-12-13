@@ -198,37 +198,20 @@ impl App {
                         renderer.camera.speed /= 1.5;
                         tracing::info!("Speed: {:.0}", renderer.camera.speed);
                     }
-                    // L3 - single broadcast per second while held
-                    Button::LeftThumb => {
-                        self.l3_held = true;
-                        self.single_shot_timer = 1.0; // Fire immediately
+                    // L4/R4 - try multiple button mappings
+                    // 8BitDo might map back paddles as C, Z, Mode, or other buttons
+                    Button::C | Button::Z | Button::Mode => {
+                        // Toggle based on which one - C/Mode for broadcast, Z for unicast
+                        if btn == Button::C || btn == Button::Mode {
+                            self.continuous_broadcast = !self.continuous_broadcast;
+                            tracing::info!("Continuous broadcast: {}", if self.continuous_broadcast { "ON" } else { "OFF" });
+                        } else {
+                            self.continuous_unicast = !self.continuous_unicast;
+                            tracing::info!("Continuous unicast: {}", if self.continuous_unicast { "ON" } else { "OFF" });
+                        }
                     }
-                    // R3 - single unicast per second while held
-                    Button::RightThumb => {
-                        self.r3_held = true;
-                        self.single_shot_timer = 1.0; // Fire immediately
-                    }
-                    // L4/R4 (C/Z or Unknown buttons) - toggle continuous modes
-                    Button::C => {
-                        self.continuous_broadcast = !self.continuous_broadcast;
-                        tracing::info!("Continuous broadcast: {}", if self.continuous_broadcast { "ON" } else { "OFF" });
-                    }
-                    Button::Z => {
-                        self.continuous_unicast = !self.continuous_unicast;
-                        tracing::info!("Continuous unicast: {}", if self.continuous_unicast { "ON" } else { "OFF" });
-                    }
-                    // Also try Unknown buttons for L4/R4
                     Button::Unknown => {
-                        tracing::debug!("Unknown button pressed");
-                    }
-                    _ => {}
-                },
-                gilrs::EventType::ButtonReleased(btn, _) => match btn {
-                    Button::LeftThumb => {
-                        self.l3_held = false;
-                    }
-                    Button::RightThumb => {
-                        self.r3_held = false;
+                        tracing::info!("Unknown button pressed - might be L4/R4");
                     }
                     _ => {}
                 },
@@ -264,6 +247,10 @@ impl App {
 
             self.unicast_intensity = lt;
             self.broadcast_intensity = rt;
+
+            // L3/R3 continuous state (thumbstick buttons)
+            self.l3_held = gamepad.is_pressed(Button::LeftThumb);
+            self.r3_held = gamepad.is_pressed(Button::RightThumb);
 
             // Only use first connected gamepad
             break;
@@ -552,6 +539,9 @@ impl ApplicationHandler for App {
                         // Update point buffer (packet heads)
                         let point_vertices = traffic.get_point_vertices();
                         renderer.update_traffic_points(&point_vertices);
+
+                        // Update mesh alpha for transparency when path visualization is active
+                        renderer.mesh_alpha = 1.0 - traffic.mesh_transparency();
                     }
 
                     // Render mesh and traffic

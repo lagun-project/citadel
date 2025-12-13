@@ -9,13 +9,14 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 /// Camera uniform data sent to GPU.
-/// Must match WGSL struct layout (96 bytes due to vec3 alignment).
+/// Must match WGSL struct layout (80 bytes).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4], // 64 bytes (0-64)
     point_size: f32,          // 4 bytes  (64-68)
-    _padding: [f32; 7],       // 28 bytes (68-96) - align to 96 for WGSL vec3
+    mesh_alpha: f32,          // 4 bytes  (68-72) - 1.0 = opaque, 0.0 = invisible
+    _padding: [f32; 2],       // 8 bytes  (72-80) - align to vec2
 }
 
 /// Main renderer state.
@@ -48,6 +49,7 @@ pub struct Renderer {
     pub mesh_data: Option<MeshData>,
     pub camera: FlyCamera,
     pub point_size: f32,
+    pub mesh_alpha: f32,
 }
 
 impl Renderer {
@@ -121,7 +123,8 @@ impl Renderer {
         let camera_uniform = CameraUniform {
             view_proj: Mat4::IDENTITY.to_cols_array_2d(),
             point_size: 2.0,
-            _padding: [0.0; 7],
+            mesh_alpha: 1.0,
+            _padding: [0.0; 2],
         };
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -326,6 +329,7 @@ impl Renderer {
             mesh_data: None,
             camera: FlyCamera::default(),
             point_size: 4.0,
+            mesh_alpha: 1.0,
         }
     }
 
@@ -432,7 +436,8 @@ impl Renderer {
         let camera_uniform = CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
             point_size: self.point_size,
-            _padding: [0.0; 7],
+            mesh_alpha: self.mesh_alpha,
+            _padding: [0.0; 2],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));

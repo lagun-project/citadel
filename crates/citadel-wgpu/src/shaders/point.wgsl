@@ -4,7 +4,8 @@
 struct CameraUniform {
     view_proj: mat4x4<f32>,
     point_size: f32,
-    _padding: vec3<f32>,
+    mesh_alpha: f32,  // 1.0 = opaque, 0.0 = invisible
+    _padding: vec2<f32>,
 }
 
 @group(0) @binding(0)
@@ -18,6 +19,7 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) mesh_alpha: f32,
 }
 
 // Unpack RGBA from u32 (ABGR format)
@@ -39,10 +41,14 @@ fn vs_main(instance: VertexInput) -> VertexOutput {
     // Unpack color
     out.color = unpack_color(instance.color);
 
+    // Pass through mesh alpha
+    out.mesh_alpha = camera.mesh_alpha;
+
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.color;
+    // Apply mesh alpha to make mesh transparent when path visualization is active
+    return vec4<f32>(in.color.rgb, in.color.a * in.mesh_alpha);
 }
