@@ -23,10 +23,12 @@
 
 mod hex;
 mod spiral;
+mod spiral3d;
 mod neighbors;
 
 pub use hex::HexCoord;
 pub use spiral::{SpiralIndex, Spiral, slots_in_ring, total_slots_through, spiral_to_coord, coord_to_spiral};
+pub use spiral3d::{Spiral3DIndex, Spiral3D, slots_in_shell, total_slots_through_shell, spiral3d_to_coord, coord_to_spiral3d};
 pub use neighbors::{Neighbors, are_neighbors, count_present_neighbors};
 
 /// Total number of connections per node (invariant: always 20)

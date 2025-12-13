@@ -1,19 +1,29 @@
-//! SPIRAL - Slot Positioning In Ring-Allocated Layers
+//! SPIRAL - Self-similar Positioning In Recursive Ascending Layers
 //!
-//! Deterministic enumeration of hexagonal coordinates in a spiral pattern.
-//! Starting from origin, we enumerate outward ring by ring.
+//! Deterministic enumeration of 3D hexagonal coordinates in a self-similar spiral.
+//! Each node placement defines its 20 neighbors' positions. The structure is:
 //!
-//! # Ring Structure
+//! - **Infinite**: No closure condition, grows forever
+//! - **Self-similar**: Same pattern at every scale
+//! - **Toroidal wrap**: Every direction wraps to its opposite via gap-and-wrap
 //!
-//! - Ring 0: Just the origin (1 slot)
-//! - Ring n (n > 0): 6n slots around the perimeter
+//! # 3D Ring Structure
 //!
-//! Total slots through ring n: 1 + 3n(n+1)
+//! The 3D spiral enumerates shells of increasing "radius" where radius is
+//! the maximum of hex distance and |z|. Within each shell:
 //!
-//! # Enumeration Order
+//! - Shell 0: Just the origin (1 slot)
+//! - Shell n > 0: All coordinates with max(hex_dist, |z|) = n
 //!
-//! Within each ring, we start at the corner with maximum q coordinate
-//! and traverse counter-clockwise through all 6 edges.
+//! # Gap and Wrap
+//!
+//! The 20-neighbor topology creates implicit wrapping:
+//! - Planar neighbors at (q±1, r±1, z)
+//! - Vertical neighbors at (q, r, z±1)
+//! - Extended neighbors at (q±1, r±1, z±1)
+//!
+//! Going far enough in any direction wraps through the extended connections,
+//! creating a toroidal superstructure across infinite space.
 
 use crate::HexCoord;
 
