@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Citadel Mesh Visualizer</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        #app {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 20, 30, 0.95);
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 16px 24px;
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .controls button {
+            background: #2a2a3a;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .controls button:hover {
+            background: #3a3a4a;
+            border-color: #666;
+        }
+
+        .controls button.active {
+            background: #4a6fa5;
+            border-color: #6a8fc5;
+        }
+
+        .controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .timeline {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+        }
+
+        .timeline input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: #333;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .timeline input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #4a6fa5;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .frame-info {
+            font-family: monospace;
+            font-size: 12px;
+            color: #888;
+            min-width: 120px;
+        }
+
+        .speed-selector {
+            display: flex;
+            gap: 4px;
+        }
+
+        .speed-selector button {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        .stats {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 20, 30, 0.9);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            font-size: 13px;
+            z-index: 100;
+        }
+
+        .stats h3 {
+            color: #4a6fa5;
+            margin-bottom: 12px;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stats .stat {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 6px;
+        }
+
+        .stats .stat-value {
+            color: #4a6fa5;
+            font-family: monospace;
+        }
+
+        .legend {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 20, 30, 0.9);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            font-size: 12px;
+            z-index: 100;
+        }
+
+        .legend h3 {
+            color: #4a6fa5;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        #graph-container {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div id="graph-container" ref="graphContainer"></div>
+
+        <div class="stats">
+            <h3>Mesh Status</h3>
+            <div class="stat">
+                <span>Nodes:</span>
+                <span class="stat-value">{{ nodeCount }}</span>
+            </div>
+            <div class="stat">
+                <span>Connections:</span>
+                <span class="stat-value">{{ connectionCount }}</span>
+            </div>
+            <div class="stat">
+                <span>Valid:</span>
+                <span class="stat-value">{{ validCount }}</span>
+            </div>
+            <div class="stat">
+                <span>Frontier Ring:</span>
+                <span class="stat-value">{{ frontierRing }}</span>
+            </div>
+        </div>
+
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4CAF50;"></div>
+                <span>Valid Node (≥11 connections)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #FFC107;"></div>
+                <span>Pending Node</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #2196F3;"></div>
+                <span>Origin</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button @click="stop" :class="{ active: !isPlaying }">⏹</button>
+            <button @click="stepBack">⏮</button>
+            <button @click="togglePlay" :class="{ active: isPlaying }">
+                {{ isPlaying ? '⏸' : '▶' }}
+            </button>
+            <button @click="stepForward">⏭</button>
+
+            <div class="timeline">
+                <input
+                    type="range"
+                    :min="0"
+                    :max="totalFrames"
+                    :value="currentFrame"
+                    @input="seek($event.target.value)"
+                >
+                <div class="frame-info">
+                    {{ currentFrame }} / {{ totalFrames }}
+                </div>
+            </div>
+
+            <div class="speed-selector">
+                <button
+                    v-for="s in speeds"
+                    :key="s.value"
+                    @click="setSpeed(s.value)"
+                    :class="{ active: speed === s.value }"
+                >
+                    {{ s.label }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                const graphContainer = ref(null);
+                let graph = null;
+                let ws = null;
+
+                // Playback state
+                const isPlaying = ref(false);
+                const currentFrame = ref(0);
+                const totalFrames = ref(0);
+                const speed = ref('Normal');
+
+                // Mesh state
+                const nodeCount = ref(0);
+                const connectionCount = ref(0);
+                const validCount = ref(0);
+                const frontierRing = ref(0);
+
+                const speeds = [
+                    { label: '0.5x', value: 'HalfSpeed' },
+                    { label: '1x', value: 'Normal' },
+                    { label: '2x', value: 'Double' },
+                    { label: '4x', value: 'Quadruple' },
+                    { label: '10x', value: 'TenX' },
+                ];
+
+                // Graph data
+                const graphData = ref({ nodes: [], links: [] });
+
+                // Convert hex coords to 3D position
+                function hexTo3D(coord, z = 0) {
+                    const size = 10;
+                    const x = size * (3/2 * coord.q);
+                    const y = size * (Math.sqrt(3)/2 * coord.q + Math.sqrt(3) * coord.r);
+                    return { x, y, z: z * size * 2 };
+                }
+
+                // Get node color based on state
+                function getNodeColor(node) {
+                    if (node.slot === 0) return '#2196F3'; // Origin
+                    if (node.is_valid) return '#4CAF50';   // Valid
+                    return '#FFC107';                        // Pending
+                }
+
+                // Initialize 3D graph
+                function initGraph() {
+                    graph = ForceGraph3D()(graphContainer.value)
+                        .backgroundColor('#0a0a0f')
+                        .nodeColor(node => getNodeColor(node))
+                        .nodeLabel(node => `Slot ${node.slot} (${node.connections?.length || 0} connections)`)
+                        .nodeRelSize(6)
+                        .linkColor(() => 'rgba(100, 150, 200, 0.3)')
+                        .linkWidth(1)
+                        .linkOpacity(0.6)
+                        .d3AlphaDecay(0.02)
+                        .d3VelocityDecay(0.3)
+                        .warmupTicks(50)
+                        .cooldownTicks(0);
+
+                    // Custom node positioning based on hex coords
+                    graph.d3Force('charge').strength(-100);
+                    graph.d3Force('link').distance(30);
+                }
+
+                // Update graph with new snapshot
+                function updateGraph(snapshot) {
+                    nodeCount.value = snapshot.node_count;
+                    connectionCount.value = snapshot.connections?.length || 0;
+                    validCount.value = snapshot.valid_count;
+                    frontierRing.value = snapshot.frontier_ring;
+
+                    const nodes = (snapshot.nodes || []).map(n => ({
+                        id: n.id[0] || n.id,
+                        slot: n.slot[0] || n.slot,
+                        coord: n.coord,
+                        connections: n.connections,
+                        is_valid: n.is_valid,
+                        // Position from hex coords
+                        fx: hexTo3D(n.coord).x,
+                        fy: hexTo3D(n.coord).y,
+                        fz: hexTo3D(n.coord, n.coord.z || 0).z,
+                    }));
+
+                    const links = (snapshot.connections || []).map(c => ({
+                        source: c.from[0] || c.from,
+                        target: c.to[0] || c.to,
+                    }));
+
+                    graphData.value = { nodes, links };
+                    if (graph) {
+                        graph.graphData(graphData.value);
+                    }
+                }
+
+                // WebSocket connection
+                function connectWs() {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+                    ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        ws.send(JSON.stringify({ type: 'get_snapshot' }));
+                        ws.send(JSON.stringify({ type: 'get_status' }));
+                    };
+
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'snapshot') {
+                            updateGraph(data);
+                        } else if (data.type === 'status') {
+                            currentFrame.value = data.current_frame;
+                            totalFrames.value = data.total_frames;
+                            isPlaying.value = data.state === 'Playing';
+                            speed.value = data.speed;
+                        } else if (data.nodes) {
+                            // Direct snapshot
+                            updateGraph(data);
+                        }
+                    };
+
+                    ws.onclose = () => {
+                        console.log('WebSocket disconnected, reconnecting...');
+                        setTimeout(connectWs, 1000);
+                    };
+                }
+
+                // Playback controls
+                function togglePlay() {
+                    if (isPlaying.value) {
+                        ws?.send(JSON.stringify({ type: 'pause' }));
+                    } else {
+                        ws?.send(JSON.stringify({ type: 'play' }));
+                    }
+                    isPlaying.value = !isPlaying.value;
+                }
+
+                function stop() {
+                    fetch('/api/playback/stop', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(updatePlaybackStatus);
+                }
+
+                function seek(frame) {
+                    ws?.send(JSON.stringify({ type: 'seek', frame: parseInt(frame) }));
+                }
+
+                function stepForward() {
+                    fetch('/api/playback/step', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ direction: 'forward' })
+                    }).then(r => r.json()).then(updatePlaybackStatus);
+                }
+
+                function stepBack() {
+                    fetch('/api/playback/step', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ direction: 'backward' })
+                    }).then(r => r.json()).then(updatePlaybackStatus);
+                }
+
+                function setSpeed(newSpeed) {
+                    fetch('/api/playback/speed', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ speed: newSpeed })
+                    }).then(r => r.json()).then(updatePlaybackStatus);
+                }
+
+                function updatePlaybackStatus(status) {
+                    currentFrame.value = status.current_frame;
+                    totalFrames.value = status.total_frames;
+                    isPlaying.value = status.state === 'Playing';
+                    speed.value = status.speed;
+
+                    // Refresh snapshot at new frame
+                    ws?.send(JSON.stringify({ type: 'get_snapshot' }));
+                }
+
+                onMounted(() => {
+                    initGraph();
+                    connectWs();
+
+                    // Initial load via REST
+                    fetch('/api/snapshot')
+                        .then(r => r.json())
+                        .then(updateGraph)
+                        .catch(() => {
+                            // Demo data if no server
+                            updateGraph({
+                                node_count: 7,
+                                valid_count: 7,
+                                frontier_ring: 1,
+                                nodes: [
+                                    { id: 0, slot: 0, coord: { q: 0, r: 0, z: 0 }, is_valid: true, connections: [1,2,3,4,5,6] },
+                                    { id: 1, slot: 1, coord: { q: 1, r: 0, z: 0 }, is_valid: true, connections: [0] },
+                                    { id: 2, slot: 2, coord: { q: 1, r: -1, z: 0 }, is_valid: true, connections: [0] },
+                                    { id: 3, slot: 3, coord: { q: 0, r: -1, z: 0 }, is_valid: true, connections: [0] },
+                                    { id: 4, slot: 4, coord: { q: -1, r: 0, z: 0 }, is_valid: true, connections: [0] },
+                                    { id: 5, slot: 5, coord: { q: -1, r: 1, z: 0 }, is_valid: true, connections: [0] },
+                                    { id: 6, slot: 6, coord: { q: 0, r: 1, z: 0 }, is_valid: true, connections: [0] },
+                                ],
+                                connections: [
+                                    { from: 0, to: 1 },
+                                    { from: 0, to: 2 },
+                                    { from: 0, to: 3 },
+                                    { from: 0, to: 4 },
+                                    { from: 0, to: 5 },
+                                    { from: 0, to: 6 },
+                                ]
+                            });
+                        });
+
+                    fetch('/api/playback')
+                        .then(r => r.json())
+                        .then(updatePlaybackStatus)
+                        .catch(() => {});
+                });
+
+                return {
+                    graphContainer,
+                    isPlaying,
+                    currentFrame,
+                    totalFrames,
+                    speed,
+                    speeds,
+                    nodeCount,
+                    connectionCount,
+                    validCount,
+                    frontierRing,
+                    togglePlay,
+                    stop,
+                    seek,
+                    stepForward,
+                    stepBack,
+                    setSpeed,
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
