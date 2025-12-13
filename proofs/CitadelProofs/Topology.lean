@@ -137,16 +137,17 @@ theorem distance_triangle (a b c : HexCoord) :
 theorem planarNeighbors_distinct (h : HexCoord) :
   (planarNeighbors h).Nodup := by
   unfold planarNeighbors
-  simp [List.nodup_cons]
-  intro
-  · simp [mk]
-  sorry -- Full proof by cases
+  simp only [List.nodup_cons, List.mem_cons, List.mem_singleton, List.not_mem_nil, not_false_eq_true, and_true]
+  simp only [make, HexCoord.mk.injEq, and_true]
+  omega
 
 /-- Vertical neighbors are distinct -/
 theorem verticalNeighbors_distinct (h : HexCoord) :
   (verticalNeighbors h).Nodup := by
   unfold verticalNeighbors
-  simp [List.nodup_cons, mk]
+  simp only [List.nodup_cons, List.mem_singleton, List.not_mem_nil, not_false_eq_true, and_true]
+  simp only [make, HexCoord.mk.injEq]
+  omega
 
 -- Connection invariants
 
@@ -155,7 +156,7 @@ theorem planarNeighbors_same_z (h : HexCoord) (n : HexCoord) :
   n ∈ planarNeighbors h → n.z = h.z := by
   intro hn
   unfold planarNeighbors at hn
-  simp [mk] at hn
+  simp [make] at hn
   rcases hn with rfl | rfl | rfl | rfl | rfl | rfl <;> rfl
 
 /-- Vertical neighbors differ by exactly 1 in z-coordinate -/
@@ -163,7 +164,7 @@ theorem verticalNeighbors_z_diff (h : HexCoord) (n : HexCoord) :
   n ∈ verticalNeighbors h → Int.natAbs (n.z - h.z) = 1 := by
   intro hn
   unfold verticalNeighbors at hn
-  simp [mk] at hn
+  simp [make] at hn
   rcases hn with rfl | rfl <;> simp
 
 /-- Extended neighbors differ by exactly 1 in z-coordinate -/
@@ -174,12 +175,12 @@ theorem extendedNeighbors_z_diff (h : HexCoord) (n : HexCoord) :
   simp only [List.mem_append] at hn
   rcases hn with hup | hdown
   · -- n is a planar neighbor of the cell above h
-    have hz : n.z = (mk h.q h.r (h.z + 1)).z := planarNeighbors_same_z _ _ hup
-    simp only [mk] at hz
+    have hz : n.z = (make h.q h.r (h.z + 1)).z := planarNeighbors_same_z _ _ hup
+    simp only [make] at hz
     simp [hz]
   · -- n is a planar neighbor of the cell below h
-    have hz : n.z = (mk h.q h.r (h.z - 1)).z := planarNeighbors_same_z _ _ hdown
-    simp only [mk] at hz
+    have hz : n.z = (make h.q h.r (h.z - 1)).z := planarNeighbors_same_z _ _ hdown
+    simp only [make] at hz
     simp [hz]
 
 end HexCoord
