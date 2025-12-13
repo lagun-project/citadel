@@ -291,11 +291,17 @@
                 const graphData = ref({ nodes: [], links: [] });
 
                 // Convert hex coords to 3D position
+                // Hex geometry: pointy-top hexagons with unit size
+                // For uniform scaling, z should match the hex spacing
                 function hexTo3D(coord, z = 0) {
                     const size = 10;
+                    // Hex spacing: x = 3/2 * size per q, y = sqrt(3) * size per r
+                    // Average planar spacing ≈ sqrt(3) * size ≈ 17.3
+                    // Z spacing should match for uniform 3D growth
                     const x = size * (3/2 * coord.q);
                     const y = size * (Math.sqrt(3)/2 * coord.q + Math.sqrt(3) * coord.r);
-                    return { x, y, z: z * size * 2 };
+                    const zSpacing = size * Math.sqrt(3);  // Match hex layer spacing
+                    return { x, y, z: z * zSpacing };
                 }
 
                 // Get node color based on state

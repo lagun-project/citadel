@@ -577,4 +577,177 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn growth_is_balanced_in_3d() {
+        // Verify that the 3D spiral grows in all three dimensions
+        // The key insight: shell n should have z values from -n to +n
+
+        use std::collections::HashSet;
+
+        for shell in 1..=4 {
+            let start = if shell == 1 { 1 } else { total_slots_through_shell(shell - 1) };
+            let end = total_slots_through_shell(shell);
+
+            let coords: Vec<_> = (start..end)
+                .map(|i| spiral3d_to_coord(Spiral3DIndex(i)))
+                .collect();
+
+            let z_values: HashSet<_> = coords.iter().map(|c| c.z).collect();
+            let q_values: HashSet<_> = coords.iter().map(|c| c.q).collect();
+
+            // Shell n should have z values from -n to +n (2n+1 distinct values)
+            let shell_i = shell as i64;
+            let expected_z_range: HashSet<_> = (-shell_i..=shell_i).collect();
+
+            assert_eq!(
+                z_values, expected_z_range,
+                "Shell {} should have z from {} to {}, got {:?}",
+                shell, -shell_i, shell_i, z_values
+            );
+
+            // Q should also range from -n to +n
+            let expected_q_range: HashSet<_> = (-shell_i..=shell_i).collect();
+            assert_eq!(
+                q_values, expected_q_range,
+                "Shell {} should have q from {} to {}, got {:?}",
+                shell, -shell_i, shell_i, q_values
+            );
+
+            println!(
+                "Shell {}: {} coords, z range {:?}, q range {:?}",
+                shell, coords.len(), z_values, q_values
+            );
+        }
+    }
+
+    #[test]
+    fn cumulative_growth_expands_all_axes() {
+        // Test cumulative growth through all slots up to N
+        // This simulates how the mesh grows during assembly
+
+        let test_counts = [21, 95, 259]; // End of shells 1, 2, 3
+
+        for count in test_counts {
+            let coords: Vec<_> = (0..count)
+                .map(|i| spiral3d_to_coord(Spiral3DIndex(i as u64)))
+                .collect();
+
+            let min_z = coords.iter().map(|c| c.z).min().unwrap();
+            let max_z = coords.iter().map(|c| c.z).max().unwrap();
+            let min_q = coords.iter().map(|c| c.q).min().unwrap();
+            let max_q = coords.iter().map(|c| c.q).max().unwrap();
+            let min_r = coords.iter().map(|c| c.r).min().unwrap();
+            let max_r = coords.iter().map(|c| c.r).max().unwrap();
+
+            let z_span = max_z - min_z;
+            let q_span = max_q - min_q;
+            let r_span = max_r - min_r;
+
+            println!(
+                "After {} nodes: Q [{}, {}] (span {}), R [{}, {}] (span {}), Z [{}, {}] (span {})",
+                count, min_q, max_q, q_span, min_r, max_r, r_span, min_z, max_z, z_span
+            );
+
+            // All axes should grow symmetrically for complete shells
+            // (q_span should equal z_span at shell boundaries)
+            assert_eq!(q_span, z_span,
+                "At {} nodes (shell boundary), Q span {} should equal Z span {}",
+                count, q_span, z_span);
+        }
+    }
+
+    #[test]
+    fn mid_shell_growth_analysis() {
+        // Analyze growth at various points, including mid-shell
+        // This shows how the mesh looks during assembly (not just at shell boundaries)
+
+        let test_points = [10, 21, 50, 75, 95, 100, 150, 200, 259];
+
+        println!("\nMesh growth analysis:");
+        println!("{:>6} | {:>12} | {:>12} | {:>12} | {:>6}", "Nodes", "Q range", "R range", "Z range", "Shell");
+        println!("{:-<6}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<6}", "", "", "", "", "");
+
+        for count in test_points {
+            let coords: Vec<_> = (0..count as u64)
+                .map(|i| spiral3d_to_coord(Spiral3DIndex(i)))
+                .collect();
+
+            let min_z = coords.iter().map(|c| c.z).min().unwrap();
+            let max_z = coords.iter().map(|c| c.z).max().unwrap();
+            let min_q = coords.iter().map(|c| c.q).min().unwrap();
+            let max_q = coords.iter().map(|c| c.q).max().unwrap();
+            let min_r = coords.iter().map(|c| c.r).min().unwrap();
+            let max_r = coords.iter().map(|c| c.r).max().unwrap();
+
+            let shell = Spiral3DIndex(count as u64 - 1).shell();
+
+            println!(
+                "{:>6} | [{:>4}, {:>4}] | [{:>4}, {:>4}] | [{:>4}, {:>4}] | {:>6}",
+                count, min_q, max_q, min_r, max_r, min_z, max_z, shell
+            );
+        }
+
+        // Key insight: mid-shell growth will show Q/R advancing faster than Z
+        // because we enumerate ring-n at z=0 first, then z=±1, etc.
+        // Only at shell end do all axes catch up
+
+        // At 100 nodes (mid shell 3), we expect Q/R to be at ±3 but Z might lag
+        let coords_100: Vec<_> = (0..100)
+            .map(|i| spiral3d_to_coord(Spiral3DIndex(i)))
+            .collect();
+
+        let z_at_100: i64 = coords_100.iter().map(|c| c.z.abs()).max().unwrap();
+        let q_at_100: i64 = coords_100.iter().map(|c| c.q.abs()).max().unwrap();
+
+        println!("\nAt 100 nodes: max|Q|={}, max|Z|={}", q_at_100, z_at_100);
+        println!("This is expected - within a shell, Q/R fill first, then Z catches up");
+    }
+
+    #[test]
+    fn diagnose_column_growth() {
+        // Diagnose whether the mesh forms a column at high shell counts
+        use std::collections::HashMap;
+
+        println!("\n=== Coordinate distribution by z-level ===\n");
+
+        // Check distribution at shell boundaries
+        for shell in [3, 5, 7] {
+            let total = total_slots_through_shell(shell);
+            let coords: Vec<_> = (0..total)
+                .map(|i| spiral3d_to_coord(Spiral3DIndex(i)))
+                .collect();
+
+            // Count coords at each z level
+            let mut z_counts: HashMap<i64, usize> = HashMap::new();
+            for c in &coords {
+                *z_counts.entry(c.z).or_insert(0) += 1;
+            }
+
+            // Count coords at each hex distance from vertical axis
+            let mut hex_dist_counts: HashMap<u64, usize> = HashMap::new();
+            for c in &coords {
+                let dist = c.hex_distance(&HexCoord::new(0, 0, c.z));
+                *hex_dist_counts.entry(dist).or_insert(0) += 1;
+            }
+
+            println!("Shell {}: {} total coords", shell, total);
+            println!("  Z distribution (z -> count):");
+            let mut z_sorted: Vec<_> = z_counts.iter().collect();
+            z_sorted.sort_by_key(|(z, _)| **z);
+            for (z, count) in z_sorted {
+                let bar = "#".repeat(*count / 5);
+                println!("    z={:+3}: {:4} {}", z, count, bar);
+            }
+
+            println!("  Hex-distance distribution (dist -> count):");
+            let mut dist_sorted: Vec<_> = hex_dist_counts.iter().collect();
+            dist_sorted.sort_by_key(|(d, _)| **d);
+            for (d, count) in dist_sorted {
+                let bar = "#".repeat(*count / 5);
+                println!("    d={:3}: {:4} {}", d, count, bar);
+            }
+            println!();
+        }
+    }
 }
