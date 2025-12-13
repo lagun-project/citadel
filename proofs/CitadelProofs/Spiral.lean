@@ -41,7 +41,7 @@ def HexCoord.ring (h : HexCoord) : Nat :=
 /-- The six directions in a hexagonal grid -/
 inductive HexDir
   | East | NorthEast | NorthWest | West | SouthWest | SouthEast
-  deriving DecidableEq, Repr
+  deriving DecidableEq, Repr, Inhabited
 
 /-- Move one step in a direction -/
 def HexCoord.step (h : HexCoord) (d : HexDir) : HexCoord :=
@@ -69,14 +69,16 @@ def totalSlotsThrough (n : Nat) : Nat :=
 /-- Key theorem: Total slots formula is correct
     Sum_{k=0}^{n} slotsInRing(k) = 1 + 3n(n+1) -/
 theorem total_slots_formula (n : Nat) :
-    (List.range (n + 1)).map slotsInRing |>.sum = totalSlotsThrough n := by
+    ((List.range (n + 1)).map slotsInRing).sum = totalSlotsThrough n := by
   induction n with
   | zero =>
     simp [slotsInRing, totalSlotsThrough]
   | succ n ih =>
-    simp [List.range_succ, List.map_append, List.sum_append]
-    simp [slotsInRing, totalSlotsThrough] at ih ⊢
-    omega
+    rw [List.range_succ, List.map_append, List.sum_append, List.map_singleton, List.sum_singleton]
+    rw [ih]
+    simp only [slotsInRing, totalSlotsThrough]
+    simp only [Nat.succ_ne_zero, ↓reduceIte]
+    ring
 
 /-- Spiral index - uniquely identifies a slot in the spiral enumeration -/
 structure SpiralIndex where
@@ -121,7 +123,7 @@ where
       let segment := offset / ring
       let posInSegment := offset % ring
       let corner := walkSteps startCoord segment ring
-      walkDir corner (dirs.get! (segment % 6)) posInSegment
+      walkDir corner (dirs[segment % 6]!) posInSegment
 
   /-- Walk n steps in a direction -/
   walkDir (h : HexCoord) (d : HexDir) (steps : Nat) : HexCoord :=
@@ -346,7 +348,7 @@ theorem spiral_determinism : ∀ idx : Nat, ∀ n1 n2 : Node,
 
 /-- MAIN THEOREM 2: Total slots formula is correct -/
 theorem spiral_total_slots (n : Nat) :
-    (List.range (n + 1)).map slotsInRing |>.sum = totalSlotsThrough n :=
+    ((List.range (n + 1)).map slotsInRing).sum = totalSlotsThrough n :=
   total_slots_formula n
 
 /-- MAIN THEOREM 3: First-writer-wins with peer validation gives consistency

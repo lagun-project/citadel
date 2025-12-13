@@ -18,7 +18,7 @@
 -/
 
 import Mathlib.Data.Nat.Basic
-import Mathlib.Algebra.BigOperators.Group.Finset
+import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Tactic
 
 namespace Citadel.Spiral3D
