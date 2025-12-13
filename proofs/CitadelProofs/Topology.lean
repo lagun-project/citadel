@@ -33,11 +33,11 @@ namespace HexCoord
 def s (h : HexCoord) : ℤ := -h.q - h.r
 
 /-- Constructor that automatically ensures the cube coordinate constraint -/
-def mk (q r z : ℤ) : HexCoord :=
+def make (q r z : ℤ) : HexCoord :=
   ⟨q, r, z, by simp⟩
 
 /-- The origin hex coordinate -/
-def origin : HexCoord := mk 0 0 0
+def origin : HexCoord := make 0 0 0
 
 theorem s_eq_neg_q_r (h : HexCoord) : h.s = -h.q - h.r := rfl
 
@@ -51,24 +51,24 @@ def distance (a b : HexCoord) : ℕ :=
 
 /-- The six planar neighbors in the hexagonal grid -/
 def planarNeighbors (h : HexCoord) : List HexCoord :=
-  [ mk (h.q + 1) h.r h.z          -- East
-  , mk (h.q + 1) (h.r - 1) h.z    -- Northeast
-  , mk h.q (h.r - 1) h.z          -- Northwest
-  , mk (h.q - 1) h.r h.z          -- West
-  , mk (h.q - 1) (h.r + 1) h.z    -- Southwest
-  , mk h.q (h.r + 1) h.z          -- Southeast
+  [ make (h.q + 1) h.r h.z          -- East
+  , make (h.q + 1) (h.r - 1) h.z    -- Northeast
+  , make h.q (h.r - 1) h.z          -- Northwest
+  , make (h.q - 1) h.r h.z          -- West
+  , make (h.q - 1) (h.r + 1) h.z    -- Southwest
+  , make h.q (h.r + 1) h.z          -- Southeast
   ]
 
 /-- The two vertical neighbors (above and below) -/
 def verticalNeighbors (h : HexCoord) : List HexCoord :=
-  [ mk h.q h.r (h.z + 1)  -- Above
-  , mk h.q h.r (h.z - 1)  -- Below
+  [ make h.q h.r (h.z + 1)  -- Above
+  , make h.q h.r (h.z - 1)  -- Below
   ]
 
 /-- The twelve extended neighbors (planar neighbors of vertical neighbors) -/
 def extendedNeighbors (h : HexCoord) : List HexCoord :=
-  let above := mk h.q h.r (h.z + 1)
-  let below := mk h.q h.r (h.z - 1)
+  let above := make h.q h.r (h.z + 1)
+  let below := make h.q h.r (h.z - 1)
   planarNeighbors above ++ planarNeighbors below
 
 /-- All 20 connections for a hex coordinate -/
