@@ -33,7 +33,6 @@ pub const MAX_BYZANTINE: usize = 6;
 /// assert_eq!(validation_threshold(1), 1);   // Need the one neighbor
 /// assert_eq!(validation_threshold(20), 11); // Full BFT threshold
 /// ```
-#[inline]
 pub const fn validation_threshold(existing_neighbors: usize) -> usize {
     if existing_neighbors == 0 {
         return 0;
@@ -43,13 +42,11 @@ pub const fn validation_threshold(existing_neighbors: usize) -> usize {
 }
 
 /// Check if a connection count meets the threshold.
-#[inline]
 pub const fn meets_threshold(connections: usize, existing_neighbors: usize) -> bool {
     connections >= validation_threshold(existing_neighbors)
 }
 
 /// Calculate how many more connections are needed to meet threshold.
-#[inline]
 pub const fn connections_needed(current: usize, existing_neighbors: usize) -> usize {
     let threshold = validation_threshold(existing_neighbors);
     if current >= threshold {

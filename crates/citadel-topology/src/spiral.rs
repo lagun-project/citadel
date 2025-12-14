@@ -37,13 +37,11 @@ impl SpiralIndex {
     pub const ORIGIN: Self = Self(0);
 
     /// Create from raw index.
-    #[inline]
     pub const fn new(index: u64) -> Self {
         Self(index)
     }
 
     /// Get the raw index value.
-    #[inline]
     pub const fn value(&self) -> u64 {
         self.0
     }
@@ -101,7 +99,6 @@ impl From<SpiralIndex> for u64 {
 ///
 /// - Ring 0: 1 slot (origin)
 /// - Ring n > 0: 6n slots
-#[inline]
 pub const fn slots_in_ring(ring: u64) -> u64 {
     if ring == 0 {
         1
@@ -115,7 +112,6 @@ pub const fn slots_in_ring(ring: u64) -> u64 {
 /// Formula: 1 + 3n(n+1)
 ///
 /// Proven in Lean: `CitadelProofs.Spiral.total_slots_formula`
-#[inline]
 pub const fn total_slots_through(ring: u64) -> u64 {
     1 + 3 * ring * (ring + 1)
 }

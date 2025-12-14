@@ -50,12 +50,10 @@ pub struct Spiral3DIndex(pub u64);
 impl Spiral3DIndex {
     pub const ORIGIN: Self = Self(0);
 
-    #[inline]
     pub const fn new(index: u64) -> Self {
         Self(index)
     }
 
-    #[inline]
     pub const fn value(&self) -> u64 {
         self.0
     }
@@ -94,7 +92,6 @@ impl Spiral3DIndex {
 ///
 /// - Shell 0: 1
 /// - Shell n > 0: 18n² + 2
-#[inline]
 pub const fn slots_in_shell(n: u64) -> u64 {
     if n == 0 {
         1
@@ -106,7 +103,6 @@ pub const fn slots_in_shell(n: u64) -> u64 {
 /// Total slots through shell n (inclusive).
 ///
 /// Formula: 6n³ + 9n² + 5n + 1
-#[inline]
 pub const fn total_slots_through_shell(n: u64) -> u64 {
     6 * n * n * n + 9 * n * n + 5 * n + 1
 }
@@ -253,13 +249,11 @@ pub fn coord_to_spiral3d(coord: HexCoord) -> Spiral3DIndex {
 // ============ Helper functions for 2D enumeration within shells ============
 
 /// Total slots through ring n in 2D: 1 + 3n(n+1)
-#[inline]
 const fn total_slots_through_shell_2d(n: u64) -> u64 {
     1 + 3 * n * (n + 1)
 }
 
 /// Slots in 2D ring n: 6n (or 1 for n=0)
-#[inline]
 const fn slots_in_ring_2d(n: u64) -> u64 {
     if n == 0 { 1 } else { 6 * n }
 }
