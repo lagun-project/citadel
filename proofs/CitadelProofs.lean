@@ -15,6 +15,7 @@ This is the root module for all Citadel formal proofs.
 * `CitadelProofs.Spiral` - SPIRAL slot enumeration and self-assembly
 * `CitadelProofs.Convergence` - Topology-first convergent self-assembly (NO FWW)
 * `CitadelProofs.Broadcast` - Broadcast protocol with toroidal wrapping and turn-left algorithm
+* `CitadelProofs.Spore` - SPORE: Succinct Proof of Range Exclusions (optimal sync)
 
 ## Main Results
 
@@ -29,9 +30,13 @@ This is the root module for all Citadel formal proofs.
 * **No duplicate delivery** - each node receives broadcast exactly once
 * **Broadcast termination** - reaches all reachable nodes in finite time
 * **Turn-left optimality** - reduces redundant traffic by avoiding backflow
+* **SPORE optimality** - encoding size ∝ boundary count (information-theoretic bound)
+* **Implicit exclusion** - gaps never sync, zero encoding cost
+* **Symmetry** - both empty and full nodes have O(1) SPORE size
 -/
 
 import CitadelProofs.Topology
 import CitadelProofs.Spiral
 import CitadelProofs.Convergence
 import CitadelProofs.Broadcast
+import CitadelProofs.Spore
