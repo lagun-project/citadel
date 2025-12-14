@@ -31,7 +31,12 @@ pub mod node;
 pub mod api;
 pub mod admin_socket;
 pub mod mesh;
+pub mod ws;
 pub mod error;
+pub mod vdf_race;
+pub mod proof_of_latency;
+pub mod pvdf;
+pub mod cvdf;
 
 pub use models::{
     Category, ContentItem, ContentType, Creator, CreatorRole, DataCiteCreator,

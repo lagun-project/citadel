@@ -2,6 +2,7 @@
 
 use crate::models::{Category, Release};
 use crate::node::LensState;
+use crate::ws::ws_mesh_handler;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -41,6 +42,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/account/:public_key", get(get_account))
         // Network mesh topology map
         .route("/api/v1/map", get(get_network_map))
+        // WebSocket for real-time mesh updates
+        .route("/api/v1/ws/mesh", get(ws_mesh_handler))
         .layer(cors)
         .with_state(state)
 }
@@ -346,13 +349,39 @@ async fn get_network_map(
             });
 
             // Add edge from self to peer
+            // Note: latency_ms is None until we implement actual RTT measurement
+            // (last_seen.elapsed() is time since last message, NOT network latency)
             edges.push(PeerEdge {
                 from: short_self_id.clone(),
                 to: short_id,
                 connection_type: if peer.coordinated { "neighbor" } else { "bootstrap" }.to_string(),
-                latency_ms: Some(peer.last_seen.elapsed().as_millis() as u32),
+                latency_ms: None,
                 bidirectional: true,
             });
+        }
+
+        // Also add nodes from claimed_slots that we've learned about via SPORE flooding
+        // but aren't directly connected to (these are known but indirect peers)
+        let known_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
+        for (slot_index, claim) in &mesh.claimed_slots {
+            let short_id = short_peer_id(&claim.peer_id);
+            if !known_ids.contains(&short_id) {
+                // Add this node we've heard about through flooding
+                nodes.push(PeerNode {
+                    id: short_id.clone(),
+                    label: short_id.clone(),
+                    slot: HexSlot {
+                        index: Some(*slot_index),
+                        q: claim.coord.q,
+                        r: claim.coord.r,
+                        z: claim.coord.z,
+                    },
+                    peer_type: "server".to_string(),
+                    last_heartbeat: 0,  // Unknown - not directly connected
+                    capabilities: vec!["storage".to_string(), "relay".to_string()],
+                    online: true,  // Assume online since we received their claim
+                });
+            }
         }
     }
 

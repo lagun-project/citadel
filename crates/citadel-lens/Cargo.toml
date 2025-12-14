@@ -18,6 +18,7 @@ path = "src/admin_cli.rs"
 citadel-topology = { path = "../citadel-topology" }
 citadel-dht = { path = "../citadel-dht" }
 citadel-protocols = { path = "../citadel-protocols" }
+citadel-spore = { path = "../citadel-spore" }
 
 # Async runtime
 tokio = { workspace = true }
@@ -42,9 +43,10 @@ rand = "0.8"
 # Storage
 rocksdb = "0.22"
 
-# HTTP server
-axum = "0.7"
+# HTTP server + WebSocket
+axum = { version = "0.7", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
