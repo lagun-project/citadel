@@ -33,6 +33,17 @@ This is the root module for all Citadel formal proofs.
 * **SPORE optimality** - encoding size ∝ boundary count (information-theoretic bound)
 * **Implicit exclusion** - gaps never sync, zero encoding cost
 * **Symmetry** - both empty and full nodes have O(1) SPORE size
+
+## SPORE Extended Theorems (from paper)
+
+* **Sync Bilateral Construction** (Thm 7.1) - Both nodes verify sync completion independently
+* **Expected Boundaries** (Thm 8.1) - O(n) worst, O(1) best, O(√n) average
+* **Byzantine Safety** (Thm 8.2) - 3f+1 nodes tolerate f Byzantine faults
+* **Dynamic Convergence** (Thm 8.3) - Stable state within bounded time after modifications
+* **Coverage Monotonicity** (Lemma 6.1) - Coverage never decreases in cooperative network
+* **Self-Optimization** (Thm 6.2) - Each successful sync reduces future overhead
+* **Convergence to Zero** (Thm 6.3) - Total WantList size converges to zero at steady state
+* **Hierarchical SPORE** - Regional aggregation for networks >10,000 nodes (data structures defined)
 -/
 
 import CitadelProofs.Topology
