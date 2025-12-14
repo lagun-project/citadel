@@ -28,19 +28,16 @@ impl HexCoord {
     pub const ORIGIN: Self = Self { q: 0, r: 0, z: 0 };
 
     /// Create a new coordinate.
-    #[inline]
     pub const fn new(q: i64, r: i64, z: i64) -> Self {
         Self { q, r, z }
     }
 
     /// Create a planar coordinate (z = 0).
-    #[inline]
     pub const fn planar(q: i64, r: i64) -> Self {
         Self { q, r, z: 0 }
     }
 
     /// Compute the implicit third axis: s = -q - r.
-    #[inline]
     pub const fn s(&self) -> i64 {
         -self.q - self.r
     }
