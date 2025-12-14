@@ -1,0 +1,50 @@
+[package]
+name = "citadel-lens"
+version.workspace = true
+edition = "2021"
+description = "Lens node for Citadel mesh - distributed content platform"
+license.workspace = true
+
+[[bin]]
+name = "lens-node"
+path = "src/main.rs"
+
+[[bin]]
+name = "lens-admin"
+path = "src/admin_cli.rs"
+
+[dependencies]
+# Citadel crates
+citadel-topology = { path = "../citadel-topology" }
+citadel-dht = { path = "../citadel-dht" }
+citadel-protocols = { path = "../citadel-protocols" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Crypto
+blake3 = { workspace = true }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+rand = "0.8"
+
+# Storage
+rocksdb = "0.22"
+
+# HTTP server
+axum = "0.7"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+[dev-dependencies]
+tempfile = "3"
