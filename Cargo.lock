@@ -585,9 +585,12 @@ version = "0.1.0"
 name = "citadel-dht"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "blake3",
  "citadel-topology",
  "hex",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]

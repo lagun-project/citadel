@@ -72,23 +72,25 @@ This is the root module for all Citadel formal proofs.
 
 The profound insight: **No node needs complete knowledge of the world for all nodes to have complete reachability.**
 
-### Mix Mode (Local Only)
-* Storage: O(k) = 20 neighbors
-* Routing: Greedy forward to closest neighbor
-* Guarantee: Always makes progress toward target (SPIRAL property)
-* No global knowledge required!
+These are **distinct operating modes**, not a hierarchy or fallback chain:
 
-### Smart Mode (2-Hop + On-Demand)
-* Storage: O(k²) = ~400 peers
-* Routing: 2-hop neighborhood + direct queries
-* Extra benefit: Mesh health verification
+### Mix Mode: NOBODY knows more than necessary
+* Storage: O(k) = 20 neighbors exactly
+* Routing: Pure greedy forward to closest neighbor
+* Guarantee: SPIRAL geometry ensures progress toward any target
+* Philosophy: Minimal state, maximum privacy
 
-### Full Mode (Complete Knowledge via SPORE)
+### Smart Mode: Know only what you NEED
+* Storage: O(k²) = ~400 peers (2-hop neighborhood)
+* Routing: Direct within 2-hop, greedy + query beyond
+* Philosophy: Balanced efficiency and minimal footprint
+
+### Full Mode: EVERYONE wants to know everything
 * Storage: O(n) eventually (via SPORE convergence)
-* Routing: O(1) direct addressing
-* Benefit: Optimal routing when available
+* Routing: O(1) direct addressing to any peer
+* Philosophy: Maximum efficiency, complete mesh awareness
 
-The hierarchy: Mix ⊂ Smart ⊂ Full. Lower modes always work as fallback.
+Each mode is self-sufficient. The network chooses ONE mode based on requirements.
 -/
 
 import CitadelProofs.Topology

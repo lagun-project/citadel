@@ -33,6 +33,37 @@ use serde::{Deserialize, Serialize};
 
 use crate::DhtKey;
 
+/// Custom serde for Option<[u8; 64]> signatures.
+mod signature_bytes {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(value: &Option<[u8; 64]>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serializer.serialize_some(&bytes[..]),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<[u8; 64]>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt: Option<Vec<u8>> = Option::deserialize(deserializer)?;
+        match opt {
+            Some(vec) if vec.len() == 64 => {
+                let mut arr = [0u8; 64];
+                arr.copy_from_slice(&vec);
+                Ok(Some(arr))
+            }
+            Some(_) => Ok(None), // Wrong length, treat as None
+            None => Ok(None),
+        }
+    }
+}
+
 /// Unique peer identifier (256-bit hash of public key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PeerId(pub [u8; 32]);
@@ -97,7 +128,7 @@ pub struct PeerInfo {
     pub id: PeerId,
 
     /// SPIRAL slot coordinates (q, r, layer).
-    pub slot: (i32, i32, i32),
+    pub slot: (i64, i64, i64),
 
     /// Network addresses (can have multiple).
     pub addresses: Vec<SocketAddr>,
@@ -109,12 +140,13 @@ pub struct PeerInfo {
     pub timestamp: u64,
 
     /// Signature over the above fields (for authenticity).
+    #[serde(with = "signature_bytes")]
     pub signature: Option<[u8; 64]>,
 }
 
 impl PeerInfo {
     /// Create new peer info.
-    pub fn new(id: PeerId, slot: (i32, i32, i32), addresses: Vec<SocketAddr>) -> Self {
+    pub fn new(id: PeerId, slot: (i64, i64, i64), addresses: Vec<SocketAddr>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -171,6 +203,49 @@ pub enum NeighborType {
     Vertical(bool),  // true = above, false = below
     /// 12 extended neighbors (6 above + 6 below diagonally).
     Extended(bool, u8),  // (above?, direction 0-5)
+}
+
+/// The three knowledge modes for routing.
+///
+/// These are **distinct operating modes**, not a hierarchy or fallback:
+/// - Each mode is a complete, self-sufficient way to operate
+/// - The network can choose ONE mode based on requirements
+/// - Nodes in different modes cannot interoperate directly
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KnowledgeMode {
+    /// Mix Mode: NOBODY knows more than necessary.
+    ///
+    /// Pure local operation:
+    /// - Each node knows only their 20 direct neighbors
+    /// - Greedy routing: forward to closest neighbor
+    /// - SPIRAL geometry guarantees progress toward any target
+    /// - Storage: O(k) = 20 peers exactly
+    ///
+    /// Use when: Minimal state is paramount, privacy is critical
+    #[default]
+    Mix,
+
+    /// Smart Mode: Know only what you NEED.
+    ///
+    /// Local + on-demand operation:
+    /// - Each node knows their 2-hop neighborhood (~400 peers)
+    /// - Can route directly within 2-hop radius
+    /// - Beyond 2-hop: greedy forward + on-demand query
+    /// - Storage: O(k²) = 400 peers
+    ///
+    /// Use when: Balance of efficiency and minimal state
+    Smart,
+
+    /// Full Mode: EVERYONE wants to know everything.
+    ///
+    /// Complete knowledge operation:
+    /// - SPORE sync actively seeks complete mesh knowledge
+    /// - WantList = [(0, 2^256)] - we want ALL peer info
+    /// - Convergence theorem: all nodes eventually know all peers
+    /// - Storage: O(n) eventually
+    ///
+    /// Use when: Maximum routing efficiency, global mesh awareness
+    Full,
 }
 
 impl NeighborType {
@@ -645,7 +720,7 @@ mod tests {
             let mut id_bytes = [0u8; 32];
             id_bytes[0] = i;
             let id = PeerId(id_bytes);
-            their_peers.push(PeerInfo::new(id, (i as i32, 0, 0), vec![test_addr()]));
+            their_peers.push(PeerInfo::new(id, (i as i64, 0, 0), vec![test_addr()]));
         }
 
         let updated = knowledge.merge_from_neighbor(neighbor, &their_peers);
