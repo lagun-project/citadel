@@ -17,10 +17,12 @@
 mod entry;
 mod state;
 mod routing;
+pub mod peer;
 
 pub use entry::{DhtKey, DhtEntry, DhtValue};
 pub use state::DhtState;
 pub use routing::{key_to_slot, route_to_key};
+pub use peer::{PeerId, PeerInfo, PeerKnowledge, PeerSpore, KnowledgeMode, NeighborType};
 
 /// Hash a string key to a DHT key using Blake3.
 pub fn hash_key(data: &[u8]) -> DhtKey {

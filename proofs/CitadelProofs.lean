@@ -16,6 +16,7 @@ This is the root module for all Citadel formal proofs.
 * `CitadelProofs.Convergence` - Topology-first convergent self-assembly (NO FWW)
 * `CitadelProofs.Broadcast` - Broadcast protocol with toroidal wrapping and turn-left algorithm
 * `CitadelProofs.Spore` - SPORE: Succinct Proof of Range Exclusions (optimal sync)
+* `CitadelProofs.TwoHopKnowledge` - Three knowledge modes (Mix/Smart/Full) with greedy routing
 
 ## Main Results
 
@@ -66,6 +67,28 @@ This is the root module for all Citadel formal proofs.
 * **Byzantine Safety** (Thm 8.2) - 3f+1 nodes tolerate f Byzantine faults
 * **Dynamic Convergence** (Thm 8.3) - Stable state within bounded time after modifications
 * **Hierarchical SPORE** - Regional aggregation for networks >10,000 nodes (data structures defined)
+
+## Three Knowledge Modes (TwoHopKnowledge)
+
+The profound insight: **No node needs complete knowledge of the world for all nodes to have complete reachability.**
+
+### Mix Mode (Local Only)
+* Storage: O(k) = 20 neighbors
+* Routing: Greedy forward to closest neighbor
+* Guarantee: Always makes progress toward target (SPIRAL property)
+* No global knowledge required!
+
+### Smart Mode (2-Hop + On-Demand)
+* Storage: O(k²) = ~400 peers
+* Routing: 2-hop neighborhood + direct queries
+* Extra benefit: Mesh health verification
+
+### Full Mode (Complete Knowledge via SPORE)
+* Storage: O(n) eventually (via SPORE convergence)
+* Routing: O(1) direct addressing
+* Benefit: Optimal routing when available
+
+The hierarchy: Mix ⊂ Smart ⊂ Full. Lower modes always work as fallback.
 -/
 
 import CitadelProofs.Topology
@@ -73,3 +96,4 @@ import CitadelProofs.Spiral
 import CitadelProofs.Convergence
 import CitadelProofs.Broadcast
 import CitadelProofs.Spore
+import CitadelProofs.TwoHopKnowledge
