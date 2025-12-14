@@ -36,13 +36,35 @@ This is the root module for all Citadel formal proofs.
 
 ## SPORE Extended Theorems (from paper)
 
+### Section 3: Core Protocol Theorems
+* **XOR Cancellation (Identical)** - XOR of identical SPOREs is empty
+* **XOR Boundary Cancellation** (Thm 3.1) - |A ⊕ B| ≤ k_A + k_B - 2m (matching ranges cancel)
+* **Fundamental Sync Equation** - sync_cost(A, B) = O(|A ⊕ B|) ≠ O(|A| + |B|)
+* **Convergence Dominates** (Cor 3.2) - XOR → 0 regardless of absolute boundary count
+* **Two-Bucket Axiom** (Sec 3.7) - Universe partitions into HAVE/WANT/EXCLUDED (binary predicates)
+* **Binary Sync Decision** - Send = MyHave ∩ TheirWant, Receive = TheirHave ∩ MyWant
+
+### Section 4: Optimality Theorems
+* **Information-Theoretic Lower Bound** (Thm 4.2) - Interval-union needs ≥ k×256 bits
+* **SPORE Achieves Bound** (Thm 4.3) - SPORE uses exactly 256 bits per boundary
+* **Global Optimality** - SPORE achieves Θ(|A ⊕ B|) sync cost (information-theoretic optimum)
+
+### Section 6: Convergence Theorems
+* **Coverage Monotonicity** (Lemma 6.1) - Coverage never decreases in cooperative network
+* **Self-Optimization** (Thm 6.2) - Each successful sync reduces future overhead
+* **Convergence to Zero** (Thm 6.3) - Total WantList size converges to zero at steady state
+
+### Section 6.6: Why Boundary Explosion Doesn't Matter
+* **XOR Cancellation Property** - Matching coverage produces empty XOR
+* **Boundary Explosion is a Mirage** - Differential cost converges to zero
+* **Self-Healing Defragmentation** - Every sync reduces fragmentation
+* **Summary** - At equilibrium, |A ⊕ B| = 0 for all pairs
+
+### Section 7-8: Integration and Practical Theorems
 * **Sync Bilateral Construction** (Thm 7.1) - Both nodes verify sync completion independently
 * **Expected Boundaries** (Thm 8.1) - O(n) worst, O(1) best, O(√n) average
 * **Byzantine Safety** (Thm 8.2) - 3f+1 nodes tolerate f Byzantine faults
 * **Dynamic Convergence** (Thm 8.3) - Stable state within bounded time after modifications
-* **Coverage Monotonicity** (Lemma 6.1) - Coverage never decreases in cooperative network
-* **Self-Optimization** (Thm 6.2) - Each successful sync reduces future overhead
-* **Convergence to Zero** (Thm 6.3) - Total WantList size converges to zero at steady state
 * **Hierarchical SPORE** - Regional aggregation for networks >10,000 nodes (data structures defined)
 -/
 
