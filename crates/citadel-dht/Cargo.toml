@@ -2,5 +2,12 @@
 name = "citadel-dht"
 version.workspace = true
 edition = "2021"
+description = "Distributed hash table for Citadel mesh"
+license.workspace = true
 
 [dependencies]
+citadel-topology = { path = "../citadel-topology" }
+blake3 = { workspace = true }
+hex = "0.4"
+
+[dev-dependencies]
