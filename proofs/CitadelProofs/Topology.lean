@@ -86,7 +86,7 @@ theorem verticalNeighbors_length (h : HexCoord) :
 theorem extendedNeighbors_length (h : HexCoord) :
   (extendedNeighbors h).length = 12 := by
   unfold extendedNeighbors planarNeighbors
-  simp [List.length_append]
+  simp
 
 /-- The fundamental theorem: every node has exactly 20 connections -/
 theorem allConnections_length (h : HexCoord) :
@@ -106,26 +106,102 @@ theorem distance_self (a : HexCoord) : distance a a = 0 := by
 
 /-- Symmetry: distance is symmetric -/
 theorem distance_symm (a b : HexCoord) : distance a b = distance b a := by
-  sorry -- Uses Int.natAbs symmetry
+  unfold distance s
+  congr 1
+  -- |x - y| = |y - x| follows from |-(x-y)| = |x-y|
+  have h1 : Int.natAbs (a.q - b.q) = Int.natAbs (b.q - a.q) := by
+    rw [← Int.natAbs_neg (a.q - b.q)]
+    ring_nf
+  have h2 : Int.natAbs (a.r - b.r) = Int.natAbs (b.r - a.r) := by
+    rw [← Int.natAbs_neg (a.r - b.r)]
+    ring_nf
+  have h3 : Int.natAbs (-a.q - a.r - (-b.q - b.r)) = Int.natAbs (-b.q - b.r - (-a.q - a.r)) := by
+    rw [← Int.natAbs_neg (-a.q - a.r - (-b.q - b.r))]
+    ring_nf
+  omega
 
 /-- Distance to planar neighbors is 1 -/
 theorem distance_to_planar_neighbor (h : HexCoord) (n : HexCoord) :
   n ∈ planarNeighbors h → distance h n = 1 := by
-  sorry -- Each case computes to 1
+  intro hn
+  unfold planarNeighbors at hn
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at hn
+  unfold distance s make
+  rcases hn with rfl | rfl | rfl | rfl | rfl | rfl
+  all_goals simp only [Int.sub_self, Int.add_zero, Int.zero_add, Int.sub_zero,
+      Int.natAbs_zero, Int.natAbs_one, Int.natAbs_neg, Int.neg_neg, Int.neg_zero]
+  all_goals ring_nf
+  all_goals simp only [Int.natAbs_zero, Int.natAbs_one, Int.natAbs_neg]
+  all_goals omega
+
+/-- Helper: sum of absolute values in hex distance is always even -/
+private lemma hex_sum_even (q r : ℤ) :
+    2 ∣ (Int.natAbs q + Int.natAbs r + Int.natAbs (-q - r)) := by
+  -- For q + r + s = 0, the sum |q| + |r| + |s| = 2 * max(|q|, |r|, |s|)
+  -- Use Int.natAbs_eq for case analysis
+  rcases Int.natAbs_eq q with hq | hq <;>
+  rcases Int.natAbs_eq r with hr | hr <;>
+  rcases Int.natAbs_eq (-q - r) with hs | hs <;>
+  simp only [hq, hr, hs, Nat.cast_add, neg_add_rev, neg_neg] at * <;>
+  omega
 
 /-- Triangle inequality for hexagonal distance -/
 theorem distance_triangle (a b c : HexCoord) :
   distance a c ≤ distance a b + distance b c := by
   unfold distance s
-  -- The proof uses the triangle inequality for absolute values
-  -- and properties of integer division
-  sorry -- Full proof requires more detailed analysis
+  -- Use triangle inequality: |x - z| ≤ |x - y| + |y - z| for each coordinate
+  have hq : Int.natAbs (a.q - c.q) ≤ Int.natAbs (a.q - b.q) + Int.natAbs (b.q - c.q) := by
+    calc Int.natAbs (a.q - c.q)
+        = Int.natAbs ((a.q - b.q) + (b.q - c.q)) := by ring_nf
+      _ ≤ Int.natAbs (a.q - b.q) + Int.natAbs (b.q - c.q) := Int.natAbs_add_le _ _
+  have hr : Int.natAbs (a.r - c.r) ≤ Int.natAbs (a.r - b.r) + Int.natAbs (b.r - c.r) := by
+    calc Int.natAbs (a.r - c.r)
+        = Int.natAbs ((a.r - b.r) + (b.r - c.r)) := by ring_nf
+      _ ≤ Int.natAbs (a.r - b.r) + Int.natAbs (b.r - c.r) := Int.natAbs_add_le _ _
+  have hs : Int.natAbs (-a.q - a.r - (-c.q - c.r)) ≤
+            Int.natAbs (-a.q - a.r - (-b.q - b.r)) + Int.natAbs (-b.q - b.r - (-c.q - c.r)) := by
+    calc Int.natAbs (-a.q - a.r - (-c.q - c.r))
+        = Int.natAbs ((-a.q - a.r - (-b.q - b.r)) + (-b.q - b.r - (-c.q - c.r))) := by ring_nf
+      _ ≤ Int.natAbs (-a.q - a.r - (-b.q - b.r)) + Int.natAbs (-b.q - b.r - (-c.q - c.r)) :=
+          Int.natAbs_add_le _ _
+  -- Sum the inequalities
+  have sum_ineq : Int.natAbs (a.q - c.q) + Int.natAbs (a.r - c.r) + Int.natAbs (-a.q - a.r - (-c.q - c.r)) ≤
+      (Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) + Int.natAbs (-a.q - a.r - (-b.q - b.r))) +
+      (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) + Int.natAbs (-b.q - b.r - (-c.q - c.r))) := by
+    omega
+  -- The sums are even due to hex coordinate constraint, so division is exact
+  -- Key: |-a.q - a.r - (-b.q - b.r)| = |-(a.q - b.q) - (a.r - b.r)| since the terms simplify
+  have hab : 2 ∣ (Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) +
+      Int.natAbs (-a.q - a.r - (-b.q - b.r))) := by
+    have heq : -a.q - a.r - (-b.q - b.r) = -(a.q - b.q) - (a.r - b.r) := by ring
+    rw [heq]
+    exact hex_sum_even (a.q - b.q) (a.r - b.r)
+  have hbc : 2 ∣ (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) +
+      Int.natAbs (-b.q - b.r - (-c.q - c.r))) := by
+    have heq : -b.q - b.r - (-c.q - c.r) = -(b.q - c.q) - (b.r - c.r) := by ring
+    rw [heq]
+    exact hex_sum_even (b.q - c.q) (b.r - c.r)
+  -- When 2 | a and 2 | b, (a + b) / 2 = a / 2 + b / 2
+  have hdiv : ((Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) + Int.natAbs (-a.q - a.r - (-b.q - b.r))) +
+      (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) + Int.natAbs (-b.q - b.r - (-c.q - c.r)))) / 2 =
+      (Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) + Int.natAbs (-a.q - a.r - (-b.q - b.r))) / 2 +
+      (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) + Int.natAbs (-b.q - b.r - (-c.q - c.r))) / 2 := by
+    obtain ⟨k, hk⟩ := hab
+    obtain ⟨m, hm⟩ := hbc
+    simp only [hk, hm]
+    omega
+  calc (Int.natAbs (a.q - c.q) + Int.natAbs (a.r - c.r) + Int.natAbs (-a.q - a.r - (-c.q - c.r))) / 2
+      ≤ ((Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) + Int.natAbs (-a.q - a.r - (-b.q - b.r))) +
+         (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) + Int.natAbs (-b.q - b.r - (-c.q - c.r)))) / 2 :=
+        Nat.div_le_div_right sum_ineq
+    _ = (Int.natAbs (a.q - b.q) + Int.natAbs (a.r - b.r) + Int.natAbs (-a.q - a.r - (-b.q - b.r))) / 2 +
+        (Int.natAbs (b.q - c.q) + Int.natAbs (b.r - c.r) + Int.natAbs (-b.q - b.r - (-c.q - c.r))) / 2 := hdiv
 
 /-- Planar neighbors are distinct -/
 theorem planarNeighbors_distinct (h : HexCoord) :
   (planarNeighbors h).Nodup := by
   unfold planarNeighbors
-  simp only [List.nodup_cons, List.mem_cons, List.mem_singleton, List.not_mem_nil,
+  simp only [List.nodup_cons, List.mem_cons, List.not_mem_nil,
              make, HexCoord.mk.injEq, not_and, or_false]
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, List.nodup_nil⟩ <;> (intro h1; omega)
 

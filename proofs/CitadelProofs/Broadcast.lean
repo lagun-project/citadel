@@ -186,10 +186,23 @@ theorem turnLeft_size (node : HexCoord) (sender : Option HexCoord) :
     simp only [HexCoord.allConnections_length]
     decide
   | some s =>
-    -- Filtering removes at most 1 element
+    -- allConnections has 20 elements
     have h20 : (HexCoord.allConnections node).length = 20 := HexCoord.allConnections_length node
-    -- List.filter can remove at most the elements that match
-    sorry -- Requires showing filter removes ≤ 1 element
+    -- filter ≠ s keeps everything except possibly s
+    -- So length ≥ 20 - 1 = 19
+    have hfilter : ((HexCoord.allConnections node).filter (· ≠ s)).length +
+        ((HexCoord.allConnections node).filter (· = s)).length =
+        (HexCoord.allConnections node).length := by
+      rw [← List.length_append, ← List.filter_append_filter_neg]
+    have hle : ((HexCoord.allConnections node).filter (· = s)).length ≤ 1 := by
+      simp only [List.length_le_one_iff_eq_replicate, List.filter_eq]
+      constructor
+      · left; rfl
+      · intro hmem
+        right
+        use s
+        rfl
+    omega
 
 /-- Turn-left never sends back to sender -/
 theorem turnLeft_no_backflow (node : HexCoord) (sender : HexCoord) :
