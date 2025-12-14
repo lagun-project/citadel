@@ -4,6 +4,7 @@ Peer-to-peer, scalable, self-organizing consensus.
 ## Organization
 Citadel is a modular *monorepo* - a single repository containing multiple crates and modules.
 
+```
 citadel/
   ├── Cargo.toml          # Workspace
   ├── proofs/             # Lean4 proofs for EVERYTHING
@@ -35,3 +36,4 @@ citadel/
       ├── citadel-logging - Citadel logging crate. Provides a logging framework for Citadel, optionally forwarding logs through Citadel to a chosen service.
       ├── citadel-metrics - Citadel metrics crate. Provides a metrics framework for Citadel.
       └── citadel-wasm - Citadel WebAssembly crate.
+```
