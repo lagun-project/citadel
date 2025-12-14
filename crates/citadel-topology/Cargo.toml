@@ -13,6 +13,11 @@ serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "topology_bench"
+harness = false
 
 [features]
 default = []
