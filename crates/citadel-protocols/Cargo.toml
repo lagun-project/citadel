@@ -2,5 +2,26 @@
 name = "citadel-protocols"
 version.workspace = true
 edition = "2021"
+description = "Reliable bilateral coordination protocols for Citadel mesh network"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
+# Two Generals Protocol - reliable bilateral coordination with continuous flooding
+two-generals = { path = "../../../two-generals/rust" }
+adaptive-flooding = { path = "../../../two-generals/rust-adaptive-flooding" }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+rand = "0.8"
