@@ -1,0 +1,441 @@
+# Citadel 50-Node Mesh Deployment
+# 3 bootstrap nodes + 47 regular nodes
+# Build: docker build -t citadel-lens:latest -f citadel/Dockerfile . (from lagun-project dir)
+# Run: docker compose up -d
+
+x-lens-node: &lens-node
+  image: citadel-lens:latest
+  networks:
+    - citadel-mesh
+  restart: unless-stopped
+  environment: &lens-env
+    LENS_DATA_DIR: /data
+    LENS_API_ADDR: 0.0.0.0:8080
+    LENS_P2P_ADDR: 0.0.0.0:9000
+    RUST_LOG: citadel_lens=info
+    # All nodes connect to the 3 bootstrap nodes
+    LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-2:9000,lens-bootstrap-3:9000
+
+# Bootstrap nodes form the stable core
+services:
+  lens-bootstrap-1:
+    <<: *lens-node
+    hostname: lens-bootstrap-1
+    container_name: lens-bootstrap-1
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-bootstrap-2:9000,lens-bootstrap-3:9000
+    ports:
+      - "8080:8080"
+    volumes:
+      - lens-bootstrap-1:/data
+
+  lens-bootstrap-2:
+    <<: *lens-node
+    hostname: lens-bootstrap-2
+    container_name: lens-bootstrap-2
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-3:9000
+    ports:
+      - "8081:8080"
+    volumes:
+      - lens-bootstrap-2:/data
+
+  lens-bootstrap-3:
+    <<: *lens-node
+    hostname: lens-bootstrap-3
+    container_name: lens-bootstrap-3
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-2:9000
+    ports:
+      - "8082:8080"
+    volumes:
+      - lens-bootstrap-3:/data
+
+  # Regular nodes - all connect to the 3 bootstrap nodes
+  lens-node-4:
+    <<: *lens-node
+    hostname: lens-node-4
+    container_name: lens-node-4
+    volumes:
+      - lens-data-4:/data
+
+  lens-node-5:
+    <<: *lens-node
+    hostname: lens-node-5
+    container_name: lens-node-5
+    volumes:
+      - lens-data-5:/data
+
+  lens-node-6:
+    <<: *lens-node
+    hostname: lens-node-6
+    container_name: lens-node-6
+    volumes:
+      - lens-data-6:/data
+
+  lens-node-7:
+    <<: *lens-node
+    hostname: lens-node-7
+    container_name: lens-node-7
+    volumes:
+      - lens-data-7:/data
+
+  lens-node-8:
+    <<: *lens-node
+    hostname: lens-node-8
+    container_name: lens-node-8
+    volumes:
+      - lens-data-8:/data
+
+  lens-node-9:
+    <<: *lens-node
+    hostname: lens-node-9
+    container_name: lens-node-9
+    volumes:
+      - lens-data-9:/data
+
+  lens-node-10:
+    <<: *lens-node
+    hostname: lens-node-10
+    container_name: lens-node-10
+    volumes:
+      - lens-data-10:/data
+
+  lens-node-11:
+    <<: *lens-node
+    hostname: lens-node-11
+    container_name: lens-node-11
+    volumes:
+      - lens-data-11:/data
+
+  lens-node-12:
+    <<: *lens-node
+    hostname: lens-node-12
+    container_name: lens-node-12
+    volumes:
+      - lens-data-12:/data
+
+  lens-node-13:
+    <<: *lens-node
+    hostname: lens-node-13
+    container_name: lens-node-13
+    volumes:
+      - lens-data-13:/data
+
+  lens-node-14:
+    <<: *lens-node
+    hostname: lens-node-14
+    container_name: lens-node-14
+    volumes:
+      - lens-data-14:/data
+
+  lens-node-15:
+    <<: *lens-node
+    hostname: lens-node-15
+    container_name: lens-node-15
+    volumes:
+      - lens-data-15:/data
+
+  lens-node-16:
+    <<: *lens-node
+    hostname: lens-node-16
+    container_name: lens-node-16
+    volumes:
+      - lens-data-16:/data
+
+  lens-node-17:
+    <<: *lens-node
+    hostname: lens-node-17
+    container_name: lens-node-17
+    volumes:
+      - lens-data-17:/data
+
+  lens-node-18:
+    <<: *lens-node
+    hostname: lens-node-18
+    container_name: lens-node-18
+    volumes:
+      - lens-data-18:/data
+
+  lens-node-19:
+    <<: *lens-node
+    hostname: lens-node-19
+    container_name: lens-node-19
+    volumes:
+      - lens-data-19:/data
+
+  lens-node-20:
+    <<: *lens-node
+    hostname: lens-node-20
+    container_name: lens-node-20
+    volumes:
+      - lens-data-20:/data
+
+  lens-node-21:
+    <<: *lens-node
+    hostname: lens-node-21
+    container_name: lens-node-21
+    volumes:
+      - lens-data-21:/data
+
+  lens-node-22:
+    <<: *lens-node
+    hostname: lens-node-22
+    container_name: lens-node-22
+    volumes:
+      - lens-data-22:/data
+
+  lens-node-23:
+    <<: *lens-node
+    hostname: lens-node-23
+    container_name: lens-node-23
+    volumes:
+      - lens-data-23:/data
+
+  lens-node-24:
+    <<: *lens-node
+    hostname: lens-node-24
+    container_name: lens-node-24
+    volumes:
+      - lens-data-24:/data
+
+  lens-node-25:
+    <<: *lens-node
+    hostname: lens-node-25
+    container_name: lens-node-25
+    volumes:
+      - lens-data-25:/data
+
+  lens-node-26:
+    <<: *lens-node
+    hostname: lens-node-26
+    container_name: lens-node-26
+    volumes:
+      - lens-data-26:/data
+
+  lens-node-27:
+    <<: *lens-node
+    hostname: lens-node-27
+    container_name: lens-node-27
+    volumes:
+      - lens-data-27:/data
+
+  lens-node-28:
+    <<: *lens-node
+    hostname: lens-node-28
+    container_name: lens-node-28
+    volumes:
+      - lens-data-28:/data
+
+  lens-node-29:
+    <<: *lens-node
+    hostname: lens-node-29
+    container_name: lens-node-29
+    volumes:
+      - lens-data-29:/data
+
+  lens-node-30:
+    <<: *lens-node
+    hostname: lens-node-30
+    container_name: lens-node-30
+    volumes:
+      - lens-data-30:/data
+
+  lens-node-31:
+    <<: *lens-node
+    hostname: lens-node-31
+    container_name: lens-node-31
+    volumes:
+      - lens-data-31:/data
+
+  lens-node-32:
+    <<: *lens-node
+    hostname: lens-node-32
+    container_name: lens-node-32
+    volumes:
+      - lens-data-32:/data
+
+  lens-node-33:
+    <<: *lens-node
+    hostname: lens-node-33
+    container_name: lens-node-33
+    volumes:
+      - lens-data-33:/data
+
+  lens-node-34:
+    <<: *lens-node
+    hostname: lens-node-34
+    container_name: lens-node-34
+    volumes:
+      - lens-data-34:/data
+
+  lens-node-35:
+    <<: *lens-node
+    hostname: lens-node-35
+    container_name: lens-node-35
+    volumes:
+      - lens-data-35:/data
+
+  lens-node-36:
+    <<: *lens-node
+    hostname: lens-node-36
+    container_name: lens-node-36
+    volumes:
+      - lens-data-36:/data
+
+  lens-node-37:
+    <<: *lens-node
+    hostname: lens-node-37
+    container_name: lens-node-37
+    volumes:
+      - lens-data-37:/data
+
+  lens-node-38:
+    <<: *lens-node
+    hostname: lens-node-38
+    container_name: lens-node-38
+    volumes:
+      - lens-data-38:/data
+
+  lens-node-39:
+    <<: *lens-node
+    hostname: lens-node-39
+    container_name: lens-node-39
+    volumes:
+      - lens-data-39:/data
+
+  lens-node-40:
+    <<: *lens-node
+    hostname: lens-node-40
+    container_name: lens-node-40
+    volumes:
+      - lens-data-40:/data
+
+  lens-node-41:
+    <<: *lens-node
+    hostname: lens-node-41
+    container_name: lens-node-41
+    volumes:
+      - lens-data-41:/data
+
+  lens-node-42:
+    <<: *lens-node
+    hostname: lens-node-42
+    container_name: lens-node-42
+    volumes:
+      - lens-data-42:/data
+
+  lens-node-43:
+    <<: *lens-node
+    hostname: lens-node-43
+    container_name: lens-node-43
+    volumes:
+      - lens-data-43:/data
+
+  lens-node-44:
+    <<: *lens-node
+    hostname: lens-node-44
+    container_name: lens-node-44
+    volumes:
+      - lens-data-44:/data
+
+  lens-node-45:
+    <<: *lens-node
+    hostname: lens-node-45
+    container_name: lens-node-45
+    volumes:
+      - lens-data-45:/data
+
+  lens-node-46:
+    <<: *lens-node
+    hostname: lens-node-46
+    container_name: lens-node-46
+    volumes:
+      - lens-data-46:/data
+
+  lens-node-47:
+    <<: *lens-node
+    hostname: lens-node-47
+    container_name: lens-node-47
+    volumes:
+      - lens-data-47:/data
+
+  lens-node-48:
+    <<: *lens-node
+    hostname: lens-node-48
+    container_name: lens-node-48
+    volumes:
+      - lens-data-48:/data
+
+  lens-node-49:
+    <<: *lens-node
+    hostname: lens-node-49
+    container_name: lens-node-49
+    volumes:
+      - lens-data-49:/data
+
+  lens-node-50:
+    <<: *lens-node
+    hostname: lens-node-50
+    container_name: lens-node-50
+    volumes:
+      - lens-data-50:/data
+
+networks:
+  citadel-mesh:
+    driver: bridge
+
+volumes:
+  lens-bootstrap-1:
+  lens-bootstrap-2:
+  lens-bootstrap-3:
+  lens-data-4:
+  lens-data-5:
+  lens-data-6:
+  lens-data-7:
+  lens-data-8:
+  lens-data-9:
+  lens-data-10:
+  lens-data-11:
+  lens-data-12:
+  lens-data-13:
+  lens-data-14:
+  lens-data-15:
+  lens-data-16:
+  lens-data-17:
+  lens-data-18:
+  lens-data-19:
+  lens-data-20:
+  lens-data-21:
+  lens-data-22:
+  lens-data-23:
+  lens-data-24:
+  lens-data-25:
+  lens-data-26:
+  lens-data-27:
+  lens-data-28:
+  lens-data-29:
+  lens-data-30:
+  lens-data-31:
+  lens-data-32:
+  lens-data-33:
+  lens-data-34:
+  lens-data-35:
+  lens-data-36:
+  lens-data-37:
+  lens-data-38:
+  lens-data-39:
+  lens-data-40:
+  lens-data-41:
+  lens-data-42:
+  lens-data-43:
+  lens-data-44:
+  lens-data-45:
+  lens-data-46:
+  lens-data-47:
+  lens-data-48:
+  lens-data-49:
+  lens-data-50:
