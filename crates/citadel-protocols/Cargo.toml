@@ -10,6 +10,9 @@ license = "AGPL-3.0-or-later"
 two-generals = { path = "../../../two-generals/rust" }
 adaptive-flooding = { path = "../../../two-generals/rust-adaptive-flooding" }
 
+# SPORE - Succinct Proof of Range Exclusions for optimal sync
+citadel-spore = { path = "../citadel-spore" }
+
 # Async runtime
 tokio = { workspace = true }
 
@@ -21,6 +24,12 @@ serde = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
+
+# Crypto for content hashing
+blake3 = "1"
+
+# Hex encoding for debug output
+hex = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
