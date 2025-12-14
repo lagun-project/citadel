@@ -1,5 +1,5 @@
 # Citadel 50-Node Mesh Deployment
-# 3 bootstrap nodes + 47 regular nodes
+# No special bootstraps - any node can be entry point
 # Build: docker build -t citadel-lens:latest -f citadel/Dockerfile . (from lagun-project dir)
 # Run: docker compose up -d
 
@@ -12,386 +12,625 @@ x-lens-node: &lens-node
     LENS_DATA_DIR: /data
     LENS_API_ADDR: 0.0.0.0:8080
     LENS_P2P_ADDR: 0.0.0.0:9000
-    RUST_LOG: citadel_lens=info
-    # All nodes connect to the 3 bootstrap nodes
-    LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-2:9000,lens-bootstrap-3:9000
+    RUST_LOG: citadel_lens=info,citadel_protocols=info
 
-# Bootstrap nodes form the stable core
 services:
-  lens-bootstrap-1:
+  # Genesis node - first to claim slot 0 (origin)
+  lens-node-1:
     <<: *lens-node
-    hostname: lens-bootstrap-1
-    container_name: lens-bootstrap-1
+    hostname: lens-node-1
+    container_name: lens-node-1
     environment:
       <<: *lens-env
-      LENS_BOOTSTRAP_PEERS: lens-bootstrap-2:9000,lens-bootstrap-3:9000
+      # Genesis has no peers initially
+      LENS_BOOTSTRAP_PEERS: ""
     ports:
       - "8080:8080"
     volumes:
-      - lens-bootstrap-1:/data
+      - lens-data-1:/data
 
-  lens-bootstrap-2:
+  # All other nodes join via any existing node
+  # Each node knows about node-1 as entry point (but could be any node)
+  lens-node-2:
     <<: *lens-node
-    hostname: lens-bootstrap-2
-    container_name: lens-bootstrap-2
+    hostname: lens-node-2
+    container_name: lens-node-2
     environment:
       <<: *lens-env
-      LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-3:9000
+      LENS_BOOTSTRAP_PEERS: lens-node-1:9000
     ports:
       - "8081:8080"
     volumes:
-      - lens-bootstrap-2:/data
+      - lens-data-2:/data
+    depends_on:
+      - lens-node-1
 
-  lens-bootstrap-3:
+  lens-node-3:
     <<: *lens-node
-    hostname: lens-bootstrap-3
-    container_name: lens-bootstrap-3
+    hostname: lens-node-3
+    container_name: lens-node-3
     environment:
       <<: *lens-env
-      LENS_BOOTSTRAP_PEERS: lens-bootstrap-1:9000,lens-bootstrap-2:9000
+      LENS_BOOTSTRAP_PEERS: lens-node-1:9000
     ports:
       - "8082:8080"
     volumes:
-      - lens-bootstrap-3:/data
+      - lens-data-3:/data
+    depends_on:
+      - lens-node-1
 
-  # Regular nodes - all connect to the 3 bootstrap nodes
   lens-node-4:
     <<: *lens-node
     hostname: lens-node-4
     container_name: lens-node-4
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-2:9000
     volumes:
       - lens-data-4:/data
+    depends_on:
+      - lens-node-2
 
   lens-node-5:
     <<: *lens-node
     hostname: lens-node-5
     container_name: lens-node-5
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-3:9000
     volumes:
       - lens-data-5:/data
+    depends_on:
+      - lens-node-3
 
   lens-node-6:
     <<: *lens-node
     hostname: lens-node-6
     container_name: lens-node-6
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-4:9000
     volumes:
       - lens-data-6:/data
+    depends_on:
+      - lens-node-4
 
   lens-node-7:
     <<: *lens-node
     hostname: lens-node-7
     container_name: lens-node-7
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-5:9000
     volumes:
       - lens-data-7:/data
+    depends_on:
+      - lens-node-5
 
   lens-node-8:
     <<: *lens-node
     hostname: lens-node-8
     container_name: lens-node-8
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-6:9000
     volumes:
       - lens-data-8:/data
+    depends_on:
+      - lens-node-6
 
   lens-node-9:
     <<: *lens-node
     hostname: lens-node-9
     container_name: lens-node-9
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-7:9000
     volumes:
       - lens-data-9:/data
+    depends_on:
+      - lens-node-7
 
   lens-node-10:
     <<: *lens-node
     hostname: lens-node-10
     container_name: lens-node-10
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-8:9000
     volumes:
       - lens-data-10:/data
+    depends_on:
+      - lens-node-8
 
   lens-node-11:
     <<: *lens-node
     hostname: lens-node-11
     container_name: lens-node-11
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-9:9000
     volumes:
       - lens-data-11:/data
+    depends_on:
+      - lens-node-9
 
   lens-node-12:
     <<: *lens-node
     hostname: lens-node-12
     container_name: lens-node-12
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-10:9000
     volumes:
       - lens-data-12:/data
+    depends_on:
+      - lens-node-10
 
   lens-node-13:
     <<: *lens-node
     hostname: lens-node-13
     container_name: lens-node-13
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-11:9000
     volumes:
       - lens-data-13:/data
+    depends_on:
+      - lens-node-11
 
   lens-node-14:
     <<: *lens-node
     hostname: lens-node-14
     container_name: lens-node-14
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-12:9000
     volumes:
       - lens-data-14:/data
+    depends_on:
+      - lens-node-12
 
   lens-node-15:
     <<: *lens-node
     hostname: lens-node-15
     container_name: lens-node-15
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-13:9000
     volumes:
       - lens-data-15:/data
+    depends_on:
+      - lens-node-13
 
   lens-node-16:
     <<: *lens-node
     hostname: lens-node-16
     container_name: lens-node-16
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-14:9000
     volumes:
       - lens-data-16:/data
+    depends_on:
+      - lens-node-14
 
   lens-node-17:
     <<: *lens-node
     hostname: lens-node-17
     container_name: lens-node-17
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-15:9000
     volumes:
       - lens-data-17:/data
+    depends_on:
+      - lens-node-15
 
   lens-node-18:
     <<: *lens-node
     hostname: lens-node-18
     container_name: lens-node-18
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-16:9000
     volumes:
       - lens-data-18:/data
+    depends_on:
+      - lens-node-16
 
   lens-node-19:
     <<: *lens-node
     hostname: lens-node-19
     container_name: lens-node-19
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-17:9000
     volumes:
       - lens-data-19:/data
+    depends_on:
+      - lens-node-17
 
   lens-node-20:
     <<: *lens-node
     hostname: lens-node-20
     container_name: lens-node-20
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-18:9000
     volumes:
       - lens-data-20:/data
+    depends_on:
+      - lens-node-18
 
   lens-node-21:
     <<: *lens-node
     hostname: lens-node-21
     container_name: lens-node-21
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-19:9000
     volumes:
       - lens-data-21:/data
+    depends_on:
+      - lens-node-19
 
   lens-node-22:
     <<: *lens-node
     hostname: lens-node-22
     container_name: lens-node-22
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-20:9000
     volumes:
       - lens-data-22:/data
+    depends_on:
+      - lens-node-20
 
   lens-node-23:
     <<: *lens-node
     hostname: lens-node-23
     container_name: lens-node-23
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-1:9000
     volumes:
       - lens-data-23:/data
+    depends_on:
+      - lens-node-1
 
   lens-node-24:
     <<: *lens-node
     hostname: lens-node-24
     container_name: lens-node-24
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-2:9000
     volumes:
       - lens-data-24:/data
+    depends_on:
+      - lens-node-2
 
   lens-node-25:
     <<: *lens-node
     hostname: lens-node-25
     container_name: lens-node-25
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-3:9000
     volumes:
       - lens-data-25:/data
+    depends_on:
+      - lens-node-3
 
   lens-node-26:
     <<: *lens-node
     hostname: lens-node-26
     container_name: lens-node-26
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-4:9000
     volumes:
       - lens-data-26:/data
+    depends_on:
+      - lens-node-4
 
   lens-node-27:
     <<: *lens-node
     hostname: lens-node-27
     container_name: lens-node-27
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-5:9000
     volumes:
       - lens-data-27:/data
+    depends_on:
+      - lens-node-5
 
   lens-node-28:
     <<: *lens-node
     hostname: lens-node-28
     container_name: lens-node-28
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-6:9000
     volumes:
       - lens-data-28:/data
+    depends_on:
+      - lens-node-6
 
   lens-node-29:
     <<: *lens-node
     hostname: lens-node-29
     container_name: lens-node-29
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-7:9000
     volumes:
       - lens-data-29:/data
+    depends_on:
+      - lens-node-7
 
   lens-node-30:
     <<: *lens-node
     hostname: lens-node-30
     container_name: lens-node-30
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-8:9000
     volumes:
       - lens-data-30:/data
+    depends_on:
+      - lens-node-8
 
   lens-node-31:
     <<: *lens-node
     hostname: lens-node-31
     container_name: lens-node-31
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-9:9000
     volumes:
       - lens-data-31:/data
+    depends_on:
+      - lens-node-9
 
   lens-node-32:
     <<: *lens-node
     hostname: lens-node-32
     container_name: lens-node-32
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-10:9000
     volumes:
       - lens-data-32:/data
+    depends_on:
+      - lens-node-10
 
   lens-node-33:
     <<: *lens-node
     hostname: lens-node-33
     container_name: lens-node-33
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-11:9000
     volumes:
       - lens-data-33:/data
+    depends_on:
+      - lens-node-11
 
   lens-node-34:
     <<: *lens-node
     hostname: lens-node-34
     container_name: lens-node-34
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-12:9000
     volumes:
       - lens-data-34:/data
+    depends_on:
+      - lens-node-12
 
   lens-node-35:
     <<: *lens-node
     hostname: lens-node-35
     container_name: lens-node-35
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-13:9000
     volumes:
       - lens-data-35:/data
+    depends_on:
+      - lens-node-13
 
   lens-node-36:
     <<: *lens-node
     hostname: lens-node-36
     container_name: lens-node-36
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-14:9000
     volumes:
       - lens-data-36:/data
+    depends_on:
+      - lens-node-14
 
   lens-node-37:
     <<: *lens-node
     hostname: lens-node-37
     container_name: lens-node-37
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-15:9000
     volumes:
       - lens-data-37:/data
+    depends_on:
+      - lens-node-15
 
   lens-node-38:
     <<: *lens-node
     hostname: lens-node-38
     container_name: lens-node-38
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-16:9000
     volumes:
       - lens-data-38:/data
+    depends_on:
+      - lens-node-16
 
   lens-node-39:
     <<: *lens-node
     hostname: lens-node-39
     container_name: lens-node-39
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-17:9000
     volumes:
       - lens-data-39:/data
+    depends_on:
+      - lens-node-17
 
   lens-node-40:
     <<: *lens-node
     hostname: lens-node-40
     container_name: lens-node-40
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-18:9000
     volumes:
       - lens-data-40:/data
+    depends_on:
+      - lens-node-18
 
   lens-node-41:
     <<: *lens-node
     hostname: lens-node-41
     container_name: lens-node-41
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-19:9000
     volumes:
       - lens-data-41:/data
+    depends_on:
+      - lens-node-19
 
   lens-node-42:
     <<: *lens-node
     hostname: lens-node-42
     container_name: lens-node-42
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-20:9000
     volumes:
       - lens-data-42:/data
+    depends_on:
+      - lens-node-20
 
   lens-node-43:
     <<: *lens-node
     hostname: lens-node-43
     container_name: lens-node-43
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-21:9000
     volumes:
       - lens-data-43:/data
+    depends_on:
+      - lens-node-21
 
   lens-node-44:
     <<: *lens-node
     hostname: lens-node-44
     container_name: lens-node-44
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-22:9000
     volumes:
       - lens-data-44:/data
+    depends_on:
+      - lens-node-22
 
   lens-node-45:
     <<: *lens-node
     hostname: lens-node-45
     container_name: lens-node-45
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-1:9000
     volumes:
       - lens-data-45:/data
+    depends_on:
+      - lens-node-1
 
   lens-node-46:
     <<: *lens-node
     hostname: lens-node-46
     container_name: lens-node-46
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-2:9000
     volumes:
       - lens-data-46:/data
+    depends_on:
+      - lens-node-2
 
   lens-node-47:
     <<: *lens-node
     hostname: lens-node-47
     container_name: lens-node-47
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-3:9000
     volumes:
       - lens-data-47:/data
+    depends_on:
+      - lens-node-3
 
   lens-node-48:
     <<: *lens-node
     hostname: lens-node-48
     container_name: lens-node-48
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-4:9000
     volumes:
       - lens-data-48:/data
+    depends_on:
+      - lens-node-4
 
   lens-node-49:
     <<: *lens-node
     hostname: lens-node-49
     container_name: lens-node-49
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-5:9000
     volumes:
       - lens-data-49:/data
+    depends_on:
+      - lens-node-5
 
   lens-node-50:
     <<: *lens-node
     hostname: lens-node-50
     container_name: lens-node-50
+    environment:
+      <<: *lens-env
+      LENS_BOOTSTRAP_PEERS: lens-node-6:9000
     volumes:
       - lens-data-50:/data
+    depends_on:
+      - lens-node-6
 
 networks:
   citadel-mesh:
     driver: bridge
 
 volumes:
-  lens-bootstrap-1:
-  lens-bootstrap-2:
-  lens-bootstrap-3:
+  lens-data-1:
+  lens-data-2:
+  lens-data-3:
   lens-data-4:
   lens-data-5:
   lens-data-6:

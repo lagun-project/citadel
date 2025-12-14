@@ -15,7 +15,7 @@ COPY citadel/Cargo.lock ./
 RUN cat > Cargo.toml << 'EOF'
 [workspace]
 resolver = "2"
-members = ["crates/citadel-lens", "crates/citadel-topology", "crates/citadel-dht", "crates/citadel-protocols"]
+members = ["crates/citadel-lens", "crates/citadel-topology", "crates/citadel-dht", "crates/citadel-protocols", "crates/citadel-spore"]
 
 [workspace.package]
 version = "0.1.0"
@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 blake3 = "1"
 ed25519-dalek = "2"
 hex = "0.4"
+serde_bytes = "0.11"
 EOF
 
 # Copy the two-generals dependency (required by citadel-protocols)
@@ -44,6 +45,7 @@ COPY citadel/crates/citadel-lens ./crates/citadel-lens
 COPY citadel/crates/citadel-topology ./crates/citadel-topology
 COPY citadel/crates/citadel-dht ./crates/citadel-dht
 COPY citadel/crates/citadel-protocols ./crates/citadel-protocols
+COPY citadel/crates/citadel-spore ./crates/citadel-spore
 
 # Fix two-generals paths for Docker build structure
 RUN sed -i 's|path = "../../../two-generals/rust"|path = "../../two-generals/rust"|' crates/citadel-protocols/Cargo.toml && \
@@ -80,6 +82,9 @@ ENV LENS_API_ADDR=0.0.0.0:8080
 ENV LENS_P2P_ADDR=0.0.0.0:9000
 ENV RUST_LOG=lens_node=info,citadel_lens=info
 
-EXPOSE 8080 9000
+# 8080: HTTP API
+# 9000: TCP P2P mesh
+# 9001: UDP TGP (Two Generals Protocol for bilateral coordination)
+EXPOSE 8080 9000 9001/udp
 
 CMD ["lens-node"]
