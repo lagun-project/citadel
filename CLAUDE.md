@@ -10,3 +10,8 @@ And finally
 ## Palace global development rules
 * Always ensure pre-commit is setup and installed in this repository
 * Use /commit (palace:commit) regularly to commit work whenever it's tested and finished
+
+## FORBIDDEN PATTERNS
+* **NO SLEEPS. NO POLLING. NO DELAYS.** - Sleeps, waits, and polling are ANTIPATTERNS and EXPRESSLY FORBIDDEN everywhere, including test scripts. Use async event-driven patterns ONLY.
+* No "FOR NOW" compromises - Do it right or don't do it
+* No "TODO" or "SIMPLIFIED IMPLEMENTATION" - Complete implementations only
