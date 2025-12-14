@@ -218,6 +218,11 @@ impl PeerCoordinator {
     /// * `keypair` - This peer's Ed25519 signing key pair
     /// * `counterparty_key` - The counterparty's public key
     /// * `config` - Coordinator configuration
+    ///
+    /// # Deprecated
+    ///
+    /// Prefer [`symmetric()`](Self::symmetric) which automatically assigns
+    /// party roles based on public key comparison.
     #[must_use]
     pub fn new(keypair: KeyPair, counterparty_key: PublicKey, config: CoordinatorConfig) -> Self {
         let party = if config.is_initiator {
@@ -251,6 +256,60 @@ impl PeerCoordinator {
             min_rate = config.flood_rate.min_rate,
             max_rate = config.flood_rate.max_rate,
             "Created new peer coordinator with adaptive flooding"
+        );
+
+        Self {
+            protocol,
+            config,
+            state: CoordinatorState::Coordinating,
+            started_at: Instant::now(),
+        }
+    }
+
+    /// Create a SYMMETRIC peer coordinator with adaptive flooding.
+    ///
+    /// Party role (Alice/Bob) is determined automatically from public key
+    /// comparison - no need to coordinate who is "initiator". Both peers
+    /// call this with the same parameters and get opposite roles.
+    ///
+    /// # Arguments
+    ///
+    /// * `keypair` - This peer's Ed25519 signing key pair
+    /// * `counterparty_key` - The counterparty's public key
+    /// * `config` - Coordinator configuration (is_initiator is ignored)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Both peers use the same constructor - roles are automatic
+    /// let peer_a = PeerCoordinator::symmetric(kp_a, pk_b, config.clone());
+    /// let peer_b = PeerCoordinator::symmetric(kp_b, pk_a, config);
+    /// // They will have opposite Alice/Bob roles automatically
+    /// ```
+    #[must_use]
+    pub fn symmetric(keypair: KeyPair, counterparty_key: PublicKey, config: CoordinatorConfig) -> Self {
+        let protocol = if let Some(ref msg) = config.commitment_message {
+            AdaptiveTGP::symmetric_with_commitment(
+                keypair,
+                counterparty_key,
+                msg.clone(),
+                config.flood_rate.min_rate,
+                config.flood_rate.max_rate,
+            )
+        } else {
+            AdaptiveTGP::symmetric(
+                keypair,
+                counterparty_key,
+                config.flood_rate.min_rate,
+                config.flood_rate.max_rate,
+            )
+        };
+
+        debug!(
+            timeout = ?config.timeout,
+            min_rate = config.flood_rate.min_rate,
+            max_rate = config.flood_rate.max_rate,
+            "Created SYMMETRIC peer coordinator with adaptive flooding"
         );
 
         Self {

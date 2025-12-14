@@ -4,7 +4,7 @@
 FROM rust:latest AS builder
 
 # Install build dependencies for rocksdb
-RUN apt-get update && apt-get install -y clang libclang-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends clang libclang-dev && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
@@ -76,15 +76,17 @@ RUN mkdir -p /data && chown lens:lens /data
 USER lens
 WORKDIR /data
 
-# Environment defaults
+# Environment variables
+# LENS_DATA_DIR: Data directory (default: /data)
+# LENS_API_BIND: HTTP API bind address (default: 0.0.0.0:8080)
+# LENS_P2P_BIND: P2P mesh bind address (default: 0.0.0.0:9000)
+# CITADEL_PEERS: Comma-separated citadel peers (DNS or IP, port optional - defaults to 9000)
+# ADMIN_PUBLIC_KEY: Hex-encoded ed25519 public key for admin
 ENV LENS_DATA_DIR=/data
-ENV LENS_API_ADDR=0.0.0.0:8080
-ENV LENS_P2P_ADDR=0.0.0.0:9000
 ENV RUST_LOG=lens_node=info,citadel_lens=info
 
 # 8080: HTTP API
-# 9000: TCP P2P mesh
-# 9001: UDP TGP (Two Generals Protocol for bilateral coordination)
-EXPOSE 8080 9000 9001/udp
+# 9000: TCP P2P mesh + UDP TGP (Two Generals Protocol)
+EXPOSE 8080 9000 9000/udp
 
 CMD ["lens-node"]
