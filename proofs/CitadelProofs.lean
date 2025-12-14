@@ -120,6 +120,30 @@ The network is:
 * **Self-healing** - Departures propagate the same way
 
 *e cinere surgemus*
+
+## Failure Detector Elimination (FailureDetectorElimination)
+
+The breakthrough: TwoGen eliminates the need for failure detectors entirely.
+
+### The Classic Problem
+* Unilateral decisions based on silence (guessing liveness)
+* Timeouts as heuristics for failure detection
+* The halting problem: "Will this remote computation ever respond?"
+
+### The TwoGen Solution
+* Replace unilateral decisions with **bilateral epistemic commitments**
+* Require **jointly constructible proof objects** for any commitment
+* Silence is a **safe state**, not something to interpret
+
+### Key Theorems
+* `no_unilateral_decision` - TwoGen never decides based on silence alone
+* `bilateral_commitment_safe` - Bilateral commitments are always safe
+* `failure_detector_unnecessary` - TwoGen protocol doesn't require failure detection
+* `failure_detector_elimination` - The complete elimination theorem
+
+### The Sidestep
+TwoGen doesn't solve the halting problem—it makes it **irrelevant**.
+The question changes from "will they respond?" to "does mutual proof exist?"
 -/
 
 import CitadelProofs.Topology
@@ -129,3 +153,4 @@ import CitadelProofs.Broadcast
 import CitadelProofs.Spore
 import CitadelProofs.TwoHopKnowledge
 import CitadelProofs.EmergentOmniscience
+import CitadelProofs.FailureDetectorElimination
