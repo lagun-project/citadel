@@ -63,6 +63,7 @@
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::vdf_race::{VdfRace, VdfLink, AnchoredSlotClaim, claim_has_priority};
+use crate::cvdf::{CvdfCoordinator, CvdfRound, RoundAttestation};
 use citadel_protocols::{
     CoordinatorConfig, FloodRateConfig, KeyPair, Message as TgpMessage, MessagePayload, PeerCoordinator, PublicKey,
     SporeSyncManager,
@@ -259,6 +260,9 @@ pub struct MeshState {
     pub pol_manager: Option<crate::proof_of_latency::PoLManager>,
     /// Pending PoL ping nonces (nonce -> target node)
     pub pol_pending_pings: HashMap<u64, [u8; 32]>,
+    /// CVDF coordinator for collaborative VDF consensus
+    /// Weight-based chain comparison (heavier wins, not taller)
+    pub cvdf: Option<CvdfCoordinator>,
     // NOTE: tgp_sessions moved to MeshService for contention-free access
 }
 
@@ -324,6 +328,14 @@ pub enum FloodMessage {
     PoLSwapProposal { proposal: crate::proof_of_latency::SwapProposal },
     /// Proof of Latency swap response
     PoLSwapResponse { response: crate::proof_of_latency::SwapResponse },
+    /// CVDF attestation for current round
+    CvdfAttestation { att: RoundAttestation },
+    /// CVDF new round produced
+    CvdfNewRound { round: CvdfRound },
+    /// CVDF chain sync request
+    CvdfSyncRequest { from_node: String, from_height: u64 },
+    /// CVDF chain sync response (all rounds)
+    CvdfSyncResponse { rounds: Vec<CvdfRound>, slots: Vec<(u64, [u8; 32])> },
 }
 
 /// Citadel Mesh Service
@@ -408,6 +420,7 @@ impl MeshService {
                 vdf_claims: HashMap::new(),
                 pol_manager: None,  // Initialized after claiming a slot
                 pol_pending_pings: HashMap::new(),
+                cvdf: None,        // Initialized as genesis or when joining mesh
             })),
             // Separate lock for TGP sessions - contention-free TGP operations
             tgp_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -705,6 +718,204 @@ impl MeshService {
     }
 
     // ==================== END VDF RACE METHODS ====================
+
+    // ==================== CVDF METHODS ====================
+    //
+    // Collaborative VDF: weight-based consensus where heavier chains win.
+    // Weight = Σ(base + attestation_count) - more attesters = heavier chain
+    // This is THE core of Constitutional P2P - collaboration beats competition.
+
+    /// CVDF Genesis seed (same as VDF for compatibility)
+    const CVDF_GENESIS_SEED: [u8; 32] = Self::VDF_GENESIS_SEED;
+
+    /// Initialize CVDF as genesis node
+    pub async fn init_cvdf_genesis(&self) {
+        let mut state = self.state.write().await;
+        let signing_key = state.signing_key.clone();
+
+        let cvdf = CvdfCoordinator::new_genesis(Self::CVDF_GENESIS_SEED, signing_key);
+        info!("CVDF initialized as genesis (height 0, weight 1)");
+
+        state.cvdf = Some(cvdf);
+    }
+
+    /// Initialize CVDF by joining existing swarm
+    /// Takes rounds from bootstrap peer and slot registrations
+    pub async fn init_cvdf_join(&self, rounds: Vec<CvdfRound>, slots: Vec<(u64, [u8; 32])>) -> bool {
+        let mut state = self.state.write().await;
+        let signing_key = state.signing_key.clone();
+
+        match CvdfCoordinator::join(Self::CVDF_GENESIS_SEED, rounds, signing_key) {
+            Some(mut cvdf) => {
+                // Register known slots
+                for (slot, pubkey) in slots {
+                    cvdf.register_slot(slot, pubkey);
+                }
+                let height = cvdf.height();
+                let weight = cvdf.weight();
+                info!("CVDF joined (height {}, weight {})", height, weight);
+                state.cvdf = Some(cvdf);
+                true
+            }
+            None => {
+                warn!("Failed to join CVDF - invalid chain");
+                false
+            }
+        }
+    }
+
+    /// Register a slot in CVDF (for attestation tracking)
+    pub async fn cvdf_register_slot(&self, slot: u64, pubkey: [u8; 32]) {
+        let mut state = self.state.write().await;
+        if let Some(ref mut cvdf) = state.cvdf {
+            cvdf.register_slot(slot, pubkey);
+            debug!("CVDF registered slot {} with pubkey {:?}", slot, &pubkey[..8]);
+        }
+    }
+
+    /// Set our slot in CVDF
+    pub async fn cvdf_set_slot(&self, slot: u64) {
+        let mut state = self.state.write().await;
+        if let Some(ref mut cvdf) = state.cvdf {
+            cvdf.set_slot(slot);
+            info!("CVDF set our slot to {}", slot);
+        }
+    }
+
+    /// Create attestation for current round
+    pub async fn cvdf_attest(&self) -> Option<RoundAttestation> {
+        let state = self.state.read().await;
+        let cvdf = state.cvdf.as_ref()?;
+        let att = cvdf.attest();
+        Some(att)
+    }
+
+    /// Process incoming attestation
+    pub async fn cvdf_process_attestation(&self, att: RoundAttestation) -> bool {
+        let mut state = self.state.write().await;
+        if let Some(cvdf) = state.cvdf.as_mut() {
+            cvdf.receive_attestation(att)
+        } else {
+            false
+        }
+    }
+
+    /// Try to produce a round (if it's our turn)
+    pub async fn cvdf_try_produce(&self) -> Option<CvdfRound> {
+        let mut state = self.state.write().await;
+        let cvdf = state.cvdf.as_mut()?;
+
+        if cvdf.is_our_turn() {
+            cvdf.try_produce()
+        } else {
+            None
+        }
+    }
+
+    /// Process incoming round
+    pub async fn cvdf_process_round(&self, round: CvdfRound) -> bool {
+        let mut state = self.state.write().await;
+        if let Some(cvdf) = state.cvdf.as_mut() {
+            cvdf.process_round(round)
+        } else {
+            false
+        }
+    }
+
+    /// Get CVDF chain state for syncing
+    pub async fn cvdf_chain_state(&self) -> Option<(Vec<CvdfRound>, Vec<(u64, [u8; 32])>)> {
+        let state = self.state.read().await;
+        let cvdf = state.cvdf.as_ref()?;
+
+        let rounds = cvdf.chain().all_rounds().to_vec();
+        let slots: Vec<(u64, [u8; 32])> = cvdf.registered_slots().clone();
+
+        Some((rounds, slots))
+    }
+
+    /// Check if we should adopt another chain (heavier)
+    pub async fn cvdf_should_adopt(&self, other_rounds: &[CvdfRound]) -> bool {
+        let state = self.state.read().await;
+        let cvdf = state.cvdf.as_ref();
+        cvdf.map(|c| c.should_adopt(other_rounds)).unwrap_or(true)
+    }
+
+    /// Adopt heavier chain
+    pub async fn cvdf_adopt(&self, rounds: Vec<CvdfRound>) -> bool {
+        let mut state = self.state.write().await;
+        let cvdf = state.cvdf.as_mut();
+        cvdf.map(|c| c.adopt(rounds)).unwrap_or(false)
+    }
+
+    /// Get CVDF height
+    pub async fn cvdf_height(&self) -> u64 {
+        let state = self.state.read().await;
+        state.cvdf.as_ref().map(|c| c.height()).unwrap_or(0)
+    }
+
+    /// Get CVDF weight
+    pub async fn cvdf_weight(&self) -> u64 {
+        let state = self.state.read().await;
+        state.cvdf.as_ref().map(|c| c.weight()).unwrap_or(0)
+    }
+
+    /// Get CVDF tip hash
+    pub async fn cvdf_tip(&self) -> [u8; 32] {
+        let state = self.state.read().await;
+        state.cvdf.as_ref()
+            .map(|c| c.chain().tip_output())
+            .unwrap_or([0u8; 32])
+    }
+
+    /// Check if CVDF is initialized
+    pub async fn cvdf_initialized(&self) -> bool {
+        let state = self.state.read().await;
+        state.cvdf.is_some()
+    }
+
+    /// Run CVDF coordination loop
+    /// This handles periodic attestation and round production
+    pub async fn run_cvdf_loop(&self) {
+        use tokio::time::{interval, Duration};
+
+        // Wait for CVDF to be initialized
+        loop {
+            if self.cvdf_initialized().await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Run coordination loop
+        let mut tick = interval(Duration::from_millis(100)); // 10Hz coordination
+
+        loop {
+            tick.tick().await;
+
+            // Create and broadcast attestation
+            if let Some(att) = self.cvdf_attest().await {
+                self.flood(FloodMessage::CvdfAttestation { att });
+            }
+
+            // Try to produce a round
+            if let Some(round) = self.cvdf_try_produce().await {
+                info!("CVDF produced round {} (weight {})",
+                    round.round, round.weight());
+                self.flood(FloodMessage::CvdfNewRound { round });
+            }
+
+            // Periodically broadcast chain state for sync
+            let height = self.cvdf_height().await;
+            if height > 0 && height % 10 == 0 {
+                if let Some((rounds, slots)) = self.cvdf_chain_state().await {
+                    let self_id = self.self_id().await;
+                    self.flood(FloodMessage::CvdfSyncResponse { rounds, slots });
+                }
+            }
+        }
+    }
+
+    // ==================== END CVDF METHODS ====================
 
     /// Attempt to occupy a SPIRAL slot through TGP bilateral connections.
     ///
@@ -1683,6 +1894,51 @@ impl MeshService {
                                     "timestamp_ms": p.timestamp_ms,
                                     "signature": hex::encode(p.signature),
                                 })).collect::<Vec<_>>(),
+                            });
+                            let _ = writer.write_all(flood_msg.to_string().as_bytes()).await;
+                            let _ = writer.write_all(b"\n").await;
+                        }
+                        Ok(FloodMessage::CvdfAttestation { att }) => {
+                            let flood_msg = serde_json::json!({
+                                "type": "cvdf_attestation",
+                                "round": att.round,
+                                "slot": att.slot,
+                                "prev_output": hex::encode(att.prev_output),
+                                "attester": hex::encode(att.attester),
+                            });
+                            let _ = writer.write_all(flood_msg.to_string().as_bytes()).await;
+                            let _ = writer.write_all(b"\n").await;
+                        }
+                        Ok(FloodMessage::CvdfNewRound { round }) => {
+                            let flood_msg = serde_json::json!({
+                                "type": "cvdf_new_round",
+                                "round": round.round,
+                                "prev_output": hex::encode(round.prev_output),
+                                "washed_input": hex::encode(round.washed_input),
+                                "output": hex::encode(round.output),
+                                "producer": hex::encode(round.producer),
+                                "attestation_count": round.attestations.len(),
+                                "weight": round.weight(),
+                            });
+                            let _ = writer.write_all(flood_msg.to_string().as_bytes()).await;
+                            let _ = writer.write_all(b"\n").await;
+                        }
+                        Ok(FloodMessage::CvdfSyncRequest { from_node, from_height }) => {
+                            let flood_msg = serde_json::json!({
+                                "type": "cvdf_sync_request",
+                                "from_node": from_node,
+                                "from_height": from_height,
+                            });
+                            let _ = writer.write_all(flood_msg.to_string().as_bytes()).await;
+                            let _ = writer.write_all(b"\n").await;
+                        }
+                        Ok(FloodMessage::CvdfSyncResponse { rounds, slots }) => {
+                            let flood_msg = serde_json::json!({
+                                "type": "cvdf_sync_response",
+                                "round_count": rounds.len(),
+                                "slot_count": slots.len(),
+                                "height": rounds.last().map(|r| r.round).unwrap_or(0),
+                                "total_weight": rounds.iter().map(|r| r.weight() as u64).sum::<u64>(),
                             });
                             let _ = writer.write_all(flood_msg.to_string().as_bytes()).await;
                             let _ = writer.write_all(b"\n").await;

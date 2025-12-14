@@ -92,6 +92,17 @@ pub enum MeshEvent {
         vdf_height: u64,
         claimer: String,
     },
+    /// CVDF chain update (collaborative VDF)
+    CvdfChainUpdate {
+        height: u64,
+        weight: u64,
+    },
+    /// CVDF new round produced
+    CvdfNewRound {
+        round: u64,
+        weight: u64,
+        attestation_count: usize,
+    },
 }
 
 /// Peer information for snapshots
@@ -318,5 +329,20 @@ pub fn flood_to_event(msg: FloodMessage) -> Option<MeshEvent> {
         FloodMessage::PoLPong { .. } => None,
         FloodMessage::PoLSwapProposal { .. } => None,
         FloodMessage::PoLSwapResponse { .. } => None,
+        // CVDF messages
+        FloodMessage::CvdfAttestation { .. } => None, // Internal coordination
+        FloodMessage::CvdfNewRound { round } => Some(MeshEvent::CvdfNewRound {
+            round: round.round,
+            weight: round.weight() as u64,
+            attestation_count: round.attestations.len(),
+        }),
+        FloodMessage::CvdfSyncRequest { .. } => None, // Internal coordination
+        FloodMessage::CvdfSyncResponse { rounds, .. } => {
+            let total_weight: u64 = rounds.iter().map(|r| r.weight() as u64).sum();
+            Some(MeshEvent::CvdfChainUpdate {
+                height: rounds.last().map(|r| r.round).unwrap_or(0),
+                weight: total_weight,
+            })
+        }
     }
 }

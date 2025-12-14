@@ -729,6 +729,11 @@ impl CvdfCoordinator {
     pub fn chain(&self) -> &CvdfChain {
         &self.chain
     }
+
+    /// Get registered slots as (slot, pubkey) pairs
+    pub fn registered_slots(&self) -> Vec<(u64, [u8; 32])> {
+        self.slot_holders.iter().map(|(k, v)| (*k, *v)).collect()
+    }
 }
 
 #[cfg(test)]
