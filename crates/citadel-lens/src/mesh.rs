@@ -75,9 +75,8 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::sync::{broadcast, oneshot, Notify, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify, RwLock};
 use tracing::{debug, error, info, warn};
 
 /// Compute PeerID from ed25519 public key using double-BLAKE3 (Archivist/IPFS style)
@@ -224,8 +223,6 @@ pub struct TgpSession {
     pub result_tx: Option<oneshot::Sender<bool>>,
     /// Peer's TGP UDP address (stored here for contention-free access)
     pub peer_tgp_addr: SocketAddr,
-    /// Whether we initiated this session (Alice role)
-    pub is_initiator: bool,
 }
 
 /// Mesh service state
@@ -340,12 +337,10 @@ pub enum FloodMessage {
 
 /// Citadel Mesh Service
 pub struct MeshService {
-    /// P2P listen address (TCP)
+    /// P2P listen address (TCP and UDP share this port)
     listen_addr: SocketAddr,
-    /// TGP UDP port (listen_addr.port() + 1)
-    tgp_port: u16,
     /// Bootstrap peers to connect to
-    bootstrap_peers: Vec<String>,
+    entry_peers: Vec<String>,
     /// Shared storage for replication
     storage: Arc<Storage>,
     /// Mesh state (peers, slots, etc.)
@@ -355,16 +350,18 @@ pub struct MeshService {
     tgp_sessions: Arc<RwLock<HashMap<String, TgpSession>>>,
     /// Broadcast channel for continuous flooding
     flood_tx: broadcast::Sender<FloodMessage>,
-    /// Notification for when initial bootstrap sync completes
-    /// Non-genesis nodes wait on this before claiming slots
-    bootstrap_sync_notify: Arc<Notify>,
+    /// Notification for when CVDF is initialized (genesis or join)
+    cvdf_init_notify: Arc<Notify>,
+    /// Channel for pending connections to spawn from listener
+    pending_connect_tx: mpsc::Sender<(String, SocketAddr)>,
+    pending_connect_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<(String, SocketAddr)>>>,
 }
 
 impl MeshService {
     /// Create a new mesh service
     pub fn new(
         listen_addr: SocketAddr,
-        bootstrap_peers: Vec<String>,
+        entry_peers: Vec<String>,
         storage: Arc<Storage>,
     ) -> Self {
         // Generate or load node keypair for peer identity
@@ -398,13 +395,12 @@ impl MeshService {
                 .expect("Failed to create TGP keypair from signing key")
         );
 
-        // TGP uses UDP on port+1 (e.g., TCP 9000, UDP 9001)
-        let tgp_port = listen_addr.port() + 1;
+        // Channel for pending connections to spawn from listener
+        let (pending_connect_tx, pending_connect_rx) = mpsc::channel(256);
 
         Self {
             listen_addr,
-            tgp_port,
-            bootstrap_peers,
+            entry_peers,
             storage,
             state: Arc::new(RwLock::new(MeshState {
                 self_id,
@@ -425,8 +421,11 @@ impl MeshService {
             // Separate lock for TGP sessions - contention-free TGP operations
             tgp_sessions: Arc::new(RwLock::new(HashMap::new())),
             flood_tx,
-            // Notification for bootstrap sync completion
-            bootstrap_sync_notify: Arc::new(Notify::new()),
+            // Notification for CVDF initialization
+            cvdf_init_notify: Arc::new(Notify::new()),
+            // Channel for pending peer connections
+            pending_connect_tx,
+            pending_connect_rx: Arc::new(tokio::sync::Mutex::new(pending_connect_rx)),
         }
     }
 
@@ -737,6 +736,10 @@ impl MeshService {
         info!("CVDF initialized as genesis (height 0, weight 1)");
 
         state.cvdf = Some(cvdf);
+        drop(state); // Release lock before notify
+
+        // Signal that CVDF is ready - unblocks the coordination loop
+        self.cvdf_init_notify.notify_waiters();
     }
 
     /// Initialize CVDF by joining existing swarm
@@ -878,13 +881,8 @@ impl MeshService {
     pub async fn run_cvdf_loop(&self) {
         use tokio::time::{interval, Duration};
 
-        // Wait for CVDF to be initialized
-        loop {
-            if self.cvdf_initialized().await {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        // Wait for CVDF to be initialized (event-driven, no polling)
+        self.cvdf_init_notify.notified().await;
 
         // Run coordination loop
         let mut tick = interval(Duration::from_millis(100)); // 10Hz coordination
@@ -1026,17 +1024,17 @@ impl MeshService {
                 (*state.tgp_keypair).clone()
             };
 
-            // Calculate peer's TGP UDP address (their TCP port + 1)
-            let peer_tgp_addr = SocketAddr::new(peer_addr.ip(), peer_addr.port() + 1);
+            // Peer's TGP UDP address (same port as TCP - UDP and TCP share port)
+            let peer_tgp_addr = peer_addr;
 
             // Create oneshot channel for result notification
             let (result_tx, result_rx) = oneshot::channel();
 
-            // Create coordinator with fast flood rate for quick handshake
-            let mut coordinator = PeerCoordinator::new(
+            // Create SYMMETRIC coordinator - role determined by public key comparison
+            let mut coordinator = PeerCoordinator::symmetric(
                 my_keypair,
                 counterparty_key,
-                CoordinatorConfig::initiator()
+                CoordinatorConfig::default()
                     .with_commitment(commitment_msg.clone().into_bytes())
                     .with_timeout(std::time::Duration::from_secs(10))
                     .with_flood_rate(FloodRateConfig::fast()),
@@ -1051,7 +1049,6 @@ impl MeshService {
                     commitment: commitment_msg.clone(),
                     result_tx: Some(result_tx),
                     peer_tgp_addr,
-                    is_initiator: true,
                 },
             );
 
@@ -1137,15 +1134,6 @@ impl MeshService {
         let priority_a = Self::slot_claim_priority(peer_a, slot_index);
         let priority_b = Self::slot_claim_priority(peer_b, slot_index);
         priority_a < priority_b  // Lower hash wins
-    }
-
-    /// Deterministic tiebreaker for TGP initiator role.
-    /// When both peers create initiator sessions simultaneously, lower hash wins.
-    /// Returns true if `my_id` should be the initiator (Alice role).
-    fn i_am_tgp_initiator(my_id: &str, their_id: &str) -> bool {
-        let my_hash = blake3::hash(my_id.as_bytes());
-        let their_hash = blake3::hash(their_id.as_bytes());
-        my_hash.as_bytes() < their_hash.as_bytes()  // Lower hash wins initiator
     }
 
     /// Process a slot claim from another node
@@ -1292,13 +1280,12 @@ impl MeshService {
         }
     }
 
-    /// Handle incoming TGP message from UDP
-    /// Returns the peer_id if message was processed (for sending response)
-    /// Uses separate tgp_sessions lock for contention-free operation
-    /// Applies deterministic tiebreaker when both peers are initiators
+    /// Handle incoming TGP message from UDP.
+    /// Returns the peer_id if message was processed (for sending response).
+    /// Uses symmetric TGP - party roles determined by public key comparison.
     async fn handle_tgp_message(&self, src_addr: SocketAddr, msg: TgpMessage) -> Option<String> {
         // Find peer by address (brief state read lock)
-        let (peer_id, my_id, my_keypair, counterparty_key) = {
+        let (peer_id, my_keypair, counterparty_key) = {
             let state = self.state.read().await;
 
             let peer = state.peers.iter()
@@ -1325,39 +1312,21 @@ impl MeshService {
             };
 
             let keypair = (*state.tgp_keypair).clone();
-            let my_id = state.self_id.clone();
             debug!("Found peer {} for TGP from {}", id, src_addr);
-            (id.clone(), my_id, keypair, counterparty)
+            (id.clone(), keypair, counterparty)
         };
 
-        // Create or fix session (separate lock)
-        // TIEBREAKER: When both peers create initiator sessions, lower hash wins initiator role
+        // Create session if needed (SYMMETRIC - no tiebreaker needed!)
+        // With symmetric TGP, both peers can create sessions independently
+        // and they'll automatically have opposite roles based on public key comparison.
         {
             let mut sessions = self.tgp_sessions.write().await;
-            let needs_responder_session = match sessions.get(&peer_id) {
-                None => true,  // No session - create responder
-                Some(session) if session.is_initiator => {
-                    // Both are initiators - apply tiebreaker
-                    // If we should be responder (their hash < our hash), recreate as responder
-                    !Self::i_am_tgp_initiator(&my_id, &peer_id)
-                }
-                Some(_) => false,  // Already responder - keep it
-            };
-
-            if needs_responder_session {
-                // Preserve result_tx if converting from initiator (so slot acquisition gets notified)
-                let preserved_result_tx = if sessions.contains_key(&peer_id) {
-                    info!("TGP tiebreaker: {} wins initiator, recreating as responder", peer_id);
-                    sessions.remove(&peer_id).and_then(|s| s.result_tx)
-                } else {
-                    None
-                };
-
-                debug!("Creating TGP responder session for {}", peer_id);
-                let mut coordinator = PeerCoordinator::new(
+            if !sessions.contains_key(&peer_id) {
+                debug!("Creating SYMMETRIC TGP session for {} (incoming message)", peer_id);
+                let mut coordinator = PeerCoordinator::symmetric(
                     my_keypair.clone(),
                     counterparty_key.clone(),
-                    CoordinatorConfig::responder()
+                    CoordinatorConfig::default()
                         .with_timeout(std::time::Duration::from_secs(30))
                         .with_flood_rate(FloodRateConfig::fast()),
                 );
@@ -1367,9 +1336,8 @@ impl MeshService {
                     TgpSession {
                         coordinator,
                         commitment: String::new(),
-                        result_tx: preserved_result_tx,  // Keep the channel!
+                        result_tx: None,
                         peer_tgp_addr: src_addr,
-                        is_initiator: false,
                     },
                 );
             }
@@ -1380,7 +1348,6 @@ impl MeshService {
             let mut sessions = self.tgp_sessions.write().await;
             if let Some(session) = sessions.get_mut(&peer_id) {
                 let old_state = session.coordinator.tgp_state();
-                let is_initiator = session.is_initiator;
                 // Log message party for debugging
                 let msg_party = match &msg.payload {
                     MessagePayload::Commitment(c) => format!("Commitment({})", c.party),
@@ -1388,8 +1355,7 @@ impl MeshService {
                     MessagePayload::TripleProof(t) => format!("Triple({})", t.party),
                     MessagePayload::QuadProof(q) => format!("Quad({})", q.party),
                 };
-                let session_party = if is_initiator { "Alice" } else { "Bob" };
-                info!("TGP recv: {} msg={} session={} (state: {:?})", peer_id, msg_party, session_party, old_state);
+                info!("TGP recv: {} msg={} (state: {:?})", peer_id, msg_party, old_state);
                 match session.coordinator.receive(&msg) {
                     Ok(advanced) => {
                         let new_state = session.coordinator.tgp_state();
@@ -1483,9 +1449,9 @@ impl MeshService {
         info!("Mesh P2P (TCP) listening on {}", self.listen_addr);
 
         // Bind UDP socket for TGP (connectionless bilateral coordination)
-        let udp_addr = SocketAddr::new(self.listen_addr.ip(), self.tgp_port);
-        let udp_socket = Arc::new(UdpSocket::bind(udp_addr).await?);
-        info!("TGP (UDP) listening on {}", udp_addr);
+        // TCP and UDP share the same port
+        let udp_socket = Arc::new(UdpSocket::bind(self.listen_addr).await?);
+        info!("TGP (UDP) listening on {}", self.listen_addr);
 
         // Store socket in state so attempt_slot_via_tgp can use it
         {
@@ -1503,16 +1469,28 @@ impl MeshService {
         // Spawn task to connect to bootstrap peers and join mesh via TGP
         let self_clone = Arc::clone(&self);
         tokio::spawn(async move {
-            // First connect to bootstrap peers to learn mesh state
-            let has_bootstrap_peers = !self_clone.bootstrap_peers.is_empty();
-            self_clone.connect_to_bootstrap_peers().await;
+            // CVDF Swarm Merge Theorem: Every node starts as genesis.
+            // When nodes meet, heavier chain wins (more attesters = heavier).
+            // See proofs/CitadelProofs/CVDF.lean theorems 9-11:
+            //   - merge_deterministic: Merge is deterministic
+            //   - merge_takes_heavier: Merge always produces heavier chain
+            //   - heavier_survives_merge: Heavier chain survives merge
+            //
+            // This means: ALWAYS init genesis immediately, then adopt heavier chains on connection.
+            // No waiting, no "am I first?" logic - chain merge handles everything.
+            info!("CVDF: Initializing as genesis (heavier chains adopted on connection)");
+            self_clone.init_cvdf_genesis().await;
+            self_clone.init_vdf_genesis().await;
 
-            // CRITICAL: If we have bootstrap peers, we MUST wait for state sync
-            // before claiming a slot. Otherwise we'll all race for slot 0!
-            if has_bootstrap_peers {
-                info!("Waiting for bootstrap peer state sync before claiming slot...");
-                self_clone.bootstrap_sync_notify.notified().await;
-                info!("Bootstrap sync complete, proceeding to claim slot");
+            // Connect to entry peers (if any)
+            // When connected, we'll exchange chain states and adopt heavier chains
+            let connected = self_clone.connect_to_entry_peers().await;
+            if connected > 0 {
+                info!("Connected to {} peer(s), exchanging chain states", connected);
+            } else if self_clone.entry_peers.is_empty() {
+                info!("No peers configured - running as standalone genesis");
+            } else {
+                info!("No entry peers responded yet - will keep trying");
             }
 
             // After learning mesh state, attempt to join via TGP
@@ -1521,6 +1499,12 @@ impl MeshService {
             loop {
                 if self_clone.attempt_slot_via_tgp(target_slot).await {
                     info!("Successfully joined mesh at slot {}", target_slot);
+
+                    // Register our slot in CVDF
+                    let pubkey = self_clone.state.read().await.signing_key.verifying_key().to_bytes();
+                    self_clone.cvdf_register_slot(target_slot, pubkey).await;
+                    self_clone.cvdf_set_slot(target_slot).await;
+
                     break;
                 }
                 // Try next slot
@@ -1532,29 +1516,80 @@ impl MeshService {
             }
         });
 
-        // Accept incoming connections
+        // Spawn CVDF coordination loop
+        let self_clone = Arc::clone(&self);
+        tokio::spawn(async move {
+            self_clone.run_cvdf_loop().await;
+        });
+
+        // Spawn entry peer retry loop - keeps trying to connect when isolated
+        // All peers are equal - CITADEL_PEERS are just entry points, not "bootstrap" nodes
+        let self_clone = Arc::clone(&self);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+
+                // Only retry if we have no peers and have entry peers configured
+                let peer_count = self_clone.state.read().await.peers.len();
+                if peer_count == 0 && !self_clone.entry_peers.is_empty() {
+                    info!("Isolated (0 peers) - retrying entry peers");
+                    let connected = self_clone.connect_to_entry_peers().await;
+                    if connected > 0 {
+                        info!("Reconnected to {} entry peer(s)", connected);
+                    }
+                }
+            }
+        });
+
+        // Accept incoming connections and handle pending outbound connections
+        let mut pending_rx = self.pending_connect_rx.lock().await;
         loop {
-            match listener.accept().await {
-                Ok((stream, addr)) => {
-                    info!("Incoming mesh connection from {}", addr);
+            tokio::select! {
+                // Handle incoming connections
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, addr)) => {
+                            info!("Incoming mesh connection from {}", addr);
+                            let self_clone = Arc::clone(&self);
+                            tokio::spawn(async move {
+                                if let Err(e) = self_clone.handle_connection(stream, addr).await {
+                                    warn!("Connection error from {}: {}", addr, e);
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            error!("Accept error: {}", e);
+                        }
+                    }
+                }
+                // Handle pending outbound connections (queued by handle_message)
+                Some((discovered_id, addr)) = pending_rx.recv() => {
                     let self_clone = Arc::clone(&self);
                     tokio::spawn(async move {
-                        if let Err(e) = self_clone.handle_connection(stream, addr).await {
-                            warn!("Connection error from {}: {}", addr, e);
+                        match TcpStream::connect(&addr).await {
+                            Ok(stream) => {
+                                debug!("Connected to discovered peer {} at {}", discovered_id, addr);
+                                if let Err(e) = self_clone.handle_connection(stream, addr).await {
+                                    debug!("Discovered peer {} connection closed: {}", discovered_id, e);
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Failed to connect to discovered peer {}: {}", discovered_id, e);
+                            }
                         }
                     });
-                }
-                Err(e) => {
-                    error!("Accept error: {}", e);
                 }
             }
         }
     }
 
-    /// Connect to bootstrap peers (spawns connections as tasks, doesn't block)
-    async fn connect_to_bootstrap_peers(self: &Arc<Self>) {
-        for peer_addr in &self.bootstrap_peers {
-            info!("Connecting to bootstrap peer: {}", peer_addr);
+    /// Connect to bootstrap peers, returns count of successful connections
+    async fn connect_to_entry_peers(self: &Arc<Self>) -> usize {
+        let mut connected = 0;
+
+        for peer_addr in &self.entry_peers {
+            info!("Connecting to peer: {}", peer_addr);
 
             match TcpStream::connect(peer_addr).await {
                 Ok(stream) => {
@@ -1567,25 +1602,28 @@ impl MeshService {
                             continue;
                         }
                     };
-                    info!("Connected to bootstrap peer {} at {}", peer_addr, addr);
+                    info!("Connected to peer {} at {}", peer_addr, addr);
+                    connected += 1;
 
                     // Spawn connection handler as task - don't block!
                     let self_clone = Arc::clone(self);
                     tokio::spawn(async move {
                         if let Err(e) = self_clone.handle_connection(stream, addr).await {
-                            warn!("Bootstrap peer {} error: {}", addr, e);
+                            warn!("Peer {} disconnected: {}", addr, e);
                         }
                     });
                 }
                 Err(e) => {
-                    warn!("Failed to connect to bootstrap peer {}: {}", peer_addr, e);
+                    warn!("Failed to connect to peer {}: {}", peer_addr, e);
                 }
             }
         }
+
+        connected
     }
 
     /// Handle a peer connection
-    async fn handle_connection(&self, stream: TcpStream, addr: SocketAddr) -> Result<()> {
+    async fn handle_connection(self: &Arc<Self>, stream: TcpStream, addr: SocketAddr) -> Result<()> {
         // Use full IP:port as initial peer_id to avoid collisions when connecting to
         // multiple peers that listen on the same port (e.g., all bootstrap nodes on :9000)
         let peer_id = format!("peer-{}", addr);
@@ -1697,6 +1735,51 @@ impl MeshService {
             writer.write_all(b"\n").await?;
         }
 
+        // CVDF chain sync: Send our chain state so peer can adopt heavier chain
+        // CRITICAL: This enables swarm merge during initial connection
+        if let Some((rounds, slots)) = self.cvdf_chain_state().await {
+            let rounds_json: Vec<serde_json::Value> = rounds.iter().map(|r| {
+                serde_json::json!({
+                    "round": r.round,
+                    "prev_output": hex::encode(r.prev_output),
+                    "washed_input": hex::encode(r.washed_input),
+                    "output": hex::encode(r.output),
+                    "producer": hex::encode(r.producer),
+                    "producer_signature": hex::encode(r.producer_signature),
+                    "timestamp_ms": r.timestamp_ms,
+                    "attestations": r.attestations.iter().map(|a| {
+                        serde_json::json!({
+                            "round": a.round,
+                            "prev_output": hex::encode(a.prev_output),
+                            "attester": hex::encode(a.attester),
+                            "slot": a.slot,
+                            "signature": hex::encode(a.signature),
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect();
+            let slots_json: Vec<serde_json::Value> = slots.iter().map(|(idx, pk)| {
+                serde_json::json!({
+                    "index": idx,
+                    "pubkey": hex::encode(pk),
+                })
+            }).collect();
+            let cvdf_sync = serde_json::json!({
+                "type": "cvdf_sync_response",
+                "rounds": rounds_json,
+                "slots": slots_json,
+                "height": rounds.last().map(|r| r.round).unwrap_or(0),
+                "total_weight": rounds.iter().map(|r| r.weight() as u64).sum::<u64>(),
+            });
+            writer.write_all(cvdf_sync.to_string().as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+            debug!("Sent CVDF chain state to peer {} (height {}, {} slots)",
+                peer_id,
+                rounds.last().map(|r| r.round).unwrap_or(0),
+                slots.len()
+            );
+        }
+
         // Subscribe to broadcast floods
         let mut flood_rx = self.flood_tx.subscribe();
 
@@ -1718,9 +1801,15 @@ impl MeshService {
                         }
                         Ok(_) => {
                             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
-                                // handle_message returns Some(real_id) when peer is re-keyed
-                                if let Ok(Some(real_id)) = self.handle_message(&current_peer_key, msg, &mut writer).await {
-                                    current_peer_key = real_id;
+                                // handle_message returns (real_id, peers_to_connect)
+                                if let Ok((real_id, peers_to_connect)) = self.handle_message(&current_peer_key, msg).await {
+                                    if let Some(id) = real_id {
+                                        current_peer_key = id;
+                                    }
+                                    // Queue discovered peers for connection (spawned by listener)
+                                    for (discovered_id, addr) in peers_to_connect {
+                                        let _ = self.pending_connect_tx.send((discovered_id, addr)).await;
+                                    }
                                 }
                             }
                         }
@@ -1933,10 +2022,38 @@ impl MeshService {
                             let _ = writer.write_all(b"\n").await;
                         }
                         Ok(FloodMessage::CvdfSyncResponse { rounds, slots }) => {
+                            // Serialize full chain data for proper sync
+                            // Rounds contain attestations, slots are (index, pubkey) pairs
+                            let rounds_json: Vec<serde_json::Value> = rounds.iter().map(|r| {
+                                serde_json::json!({
+                                    "round": r.round,
+                                    "prev_output": hex::encode(r.prev_output),
+                                    "washed_input": hex::encode(r.washed_input),
+                                    "output": hex::encode(r.output),
+                                    "producer": hex::encode(r.producer),
+                                    "producer_signature": hex::encode(r.producer_signature),
+                                    "timestamp_ms": r.timestamp_ms,
+                                    "attestations": r.attestations.iter().map(|a| {
+                                        serde_json::json!({
+                                            "round": a.round,
+                                            "prev_output": hex::encode(a.prev_output),
+                                            "attester": hex::encode(a.attester),
+                                            "slot": a.slot,
+                                            "signature": hex::encode(a.signature),
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                })
+                            }).collect();
+                            let slots_json: Vec<serde_json::Value> = slots.iter().map(|(idx, pk)| {
+                                serde_json::json!({
+                                    "index": idx,
+                                    "pubkey": hex::encode(pk),
+                                })
+                            }).collect();
                             let flood_msg = serde_json::json!({
                                 "type": "cvdf_sync_response",
-                                "round_count": rounds.len(),
-                                "slot_count": slots.len(),
+                                "rounds": rounds_json,
+                                "slots": slots_json,
                                 "height": rounds.last().map(|r| r.round).unwrap_or(0),
                                 "total_weight": rounds.iter().map(|r| r.weight() as u64).sum::<u64>(),
                             });
@@ -1961,13 +2078,14 @@ impl MeshService {
     }
 
     /// Handle incoming message from peer
-    /// Returns the real PeerID if learned from hello (for re-keying)
+    /// Returns (real_peer_id, peers_to_connect) where:
+    /// - real_peer_id: Some(id) if learned from hello (for re-keying)
+    /// - peers_to_connect: Vec of (peer_id, addr) to connect to in background
     async fn handle_message(
-        &self,
+        self: &Arc<Self>,
         peer_id: &str,
         msg: serde_json::Value,
-        _writer: &mut OwnedWriteHalf,
-    ) -> Result<Option<String>> {
+    ) -> Result<(Option<String>, Vec<(String, SocketAddr)>)> {
         let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         match msg_type {
@@ -1996,13 +2114,13 @@ impl MeshService {
                             peer.id = node_id.to_string();
                             peer.public_key = public_key;
                             // Keep peer's IP but use their listening port (not ephemeral TCP source port)
-                            // This is critical for TGP UDP: their IP + listening port 9000 → TGP on 9001
+                            // TCP and UDP share the same port for both mesh and TGP
                             peer.addr = SocketAddr::new(peer.addr.ip(), listen_port);
                             peer.last_seen = std::time::Instant::now();
                             let peer_addr = peer.addr;
                             state.peers.insert(node_id.to_string(), peer);
                             info!("Peer {} identified as {} at {}", peer_id, node_id, peer_addr);
-                            return Ok(Some(node_id.to_string()));
+                            return Ok((Some(node_id.to_string()), vec![]));
                         }
                     }
                 }
@@ -2078,12 +2196,20 @@ impl MeshService {
                 }
                 // Re-flood newly discovered peers to propagate through mesh
                 if !new_peers.is_empty() {
-                    self.flood(FloodMessage::Peers(new_peers));
-                }
+                    // Collect addresses to connect (we'll connect after releasing locks)
+                    let peers_to_connect: Vec<(String, SocketAddr)> = new_peers.iter()
+                        .filter_map(|(peer_id, addr_str, _, _)| {
+                            addr_str.parse::<SocketAddr>().ok().map(|addr| (peer_id.clone(), addr))
+                        })
+                        .collect();
 
-                // Signal that we've received initial bootstrap state
-                // This unblocks the slot claiming task waiting for sync
-                self.bootstrap_sync_notify.notify_one();
+                    self.flood(FloodMessage::Peers(new_peers));
+
+                    // Return peers to connect - caller will spawn connections
+                    return Ok((None, peers_to_connect));
+                }
+                // Note: No bootstrap sync signal needed - CVDF swarm merge handles everything.
+                // When we receive heavier chains, we adopt them automatically.
             }
             "slot_claim" => {
                 // Process a slot claim from another node
@@ -2356,6 +2482,208 @@ impl MeshService {
                 // Full implementation would parse the response and call pol_manager.process_response()
                 // For now, log and skip - swap handling requires bidirectional communication
             }
+            // ==================== CVDF MESSAGE HANDLERS ====================
+            "cvdf_attestation" => {
+                // Parse attestation and process it
+                if let (Some(round), Some(slot), Some(prev_output_hex), Some(attester_hex), Some(sig_hex)) = (
+                    msg.get("round").and_then(|r| r.as_u64()),
+                    msg.get("slot").and_then(|s| s.as_u64()),
+                    msg.get("prev_output").and_then(|p| p.as_str()),
+                    msg.get("attester").and_then(|a| a.as_str()),
+                    msg.get("signature").and_then(|s| s.as_str()),
+                ) {
+                    if let (Ok(prev_output), Ok(attester), Ok(signature)) = (
+                        hex::decode(prev_output_hex),
+                        hex::decode(attester_hex),
+                        hex::decode(sig_hex),
+                    ) {
+                        if prev_output.len() == 32 && attester.len() == 32 && signature.len() == 64 {
+                            let att = RoundAttestation {
+                                round,
+                                prev_output: prev_output.try_into().unwrap(),
+                                attester: attester.try_into().unwrap(),
+                                slot: Some(slot),
+                                signature: signature.try_into().unwrap(),
+                            };
+                            if self.cvdf_process_attestation(att).await {
+                                debug!("Processed CVDF attestation for round {} from {}", round, peer_id);
+                            }
+                        }
+                    }
+                }
+            }
+            "cvdf_new_round" => {
+                // Parse and process new round
+                // Note: This requires full round data including attestations
+                debug!("Received cvdf_new_round from {} (round {})", peer_id,
+                    msg.get("round").and_then(|r| r.as_u64()).unwrap_or(0));
+                // Full round processing requires attestations array - handled by flood
+            }
+            "cvdf_sync_request" => {
+                // Respond with our chain state
+                if let Some(from_height) = msg.get("from_height").and_then(|h| h.as_u64()) {
+                    debug!("Received CVDF sync request from {} (from_height {})", peer_id, from_height);
+                    // Send our chain state via flood
+                    if let Some((rounds, slots)) = self.cvdf_chain_state().await {
+                        self.flood(FloodMessage::CvdfSyncResponse { rounds, slots });
+                    }
+                }
+            }
+            "cvdf_sync_response" => {
+                // Parse chain data, adopt if heavier, process slots with tiebreaker
+                debug!("Received CVDF sync response from {}", peer_id);
+
+                // Parse rounds
+                let mut parsed_rounds: Vec<CvdfRound> = Vec::new();
+                if let Some(rounds_arr) = msg.get("rounds").and_then(|r| r.as_array()) {
+                    for round_json in rounds_arr {
+                        if let (
+                            Some(round_num), Some(prev_output_hex), Some(washed_input_hex),
+                            Some(output_hex), Some(producer_hex), Some(producer_sig_hex),
+                            Some(timestamp_ms), Some(attestations_arr)
+                        ) = (
+                            round_json.get("round").and_then(|r| r.as_u64()),
+                            round_json.get("prev_output").and_then(|p| p.as_str()),
+                            round_json.get("washed_input").and_then(|w| w.as_str()),
+                            round_json.get("output").and_then(|o| o.as_str()),
+                            round_json.get("producer").and_then(|p| p.as_str()),
+                            round_json.get("producer_signature").and_then(|s| s.as_str()),
+                            round_json.get("timestamp_ms").and_then(|t| t.as_u64()),
+                            round_json.get("attestations").and_then(|a| a.as_array()),
+                        ) {
+                            // Parse byte arrays
+                            let prev_output = hex::decode(prev_output_hex).ok();
+                            let washed_input = hex::decode(washed_input_hex).ok();
+                            let output = hex::decode(output_hex).ok();
+                            let producer = hex::decode(producer_hex).ok();
+                            let producer_sig = hex::decode(producer_sig_hex).ok();
+
+                            if let (Some(prev), Some(washed), Some(out), Some(prod), Some(sig)) =
+                                (prev_output, washed_input, output, producer, producer_sig)
+                            {
+                                if prev.len() == 32 && washed.len() == 32 && out.len() == 32 &&
+                                   prod.len() == 32 && sig.len() == 64
+                                {
+                                    // Parse attestations
+                                    let mut attestations = Vec::new();
+                                    for att_json in attestations_arr {
+                                        if let (Some(att_round), Some(att_prev_hex), Some(att_attester_hex), Some(att_sig_hex)) = (
+                                            att_json.get("round").and_then(|r| r.as_u64()),
+                                            att_json.get("prev_output").and_then(|p| p.as_str()),
+                                            att_json.get("attester").and_then(|a| a.as_str()),
+                                            att_json.get("signature").and_then(|s| s.as_str()),
+                                        ) {
+                                            let att_prev = hex::decode(att_prev_hex).ok();
+                                            let att_attester = hex::decode(att_attester_hex).ok();
+                                            let att_sig = hex::decode(att_sig_hex).ok();
+                                            let att_slot = att_json.get("slot").and_then(|s| s.as_u64());
+
+                                            if let (Some(ap), Some(aa), Some(asig)) = (att_prev, att_attester, att_sig) {
+                                                if ap.len() == 32 && aa.len() == 32 && asig.len() == 64 {
+                                                    attestations.push(RoundAttestation {
+                                                        round: att_round,
+                                                        prev_output: ap.try_into().unwrap(),
+                                                        attester: aa.try_into().unwrap(),
+                                                        slot: att_slot,
+                                                        signature: asig.try_into().unwrap(),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    parsed_rounds.push(CvdfRound {
+                                        round: round_num,
+                                        prev_output: prev.try_into().unwrap(),
+                                        washed_input: washed.try_into().unwrap(),
+                                        output: out.try_into().unwrap(),
+                                        producer: prod.try_into().unwrap(),
+                                        producer_signature: sig.try_into().unwrap(),
+                                        timestamp_ms,
+                                        attestations,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Parse slots
+                let mut parsed_slots: Vec<(u64, [u8; 32])> = Vec::new();
+                if let Some(slots_arr) = msg.get("slots").and_then(|s| s.as_array()) {
+                    for slot_json in slots_arr {
+                        if let (Some(index), Some(pubkey_hex)) = (
+                            slot_json.get("index").and_then(|i| i.as_u64()),
+                            slot_json.get("pubkey").and_then(|p| p.as_str()),
+                        ) {
+                            if let Ok(pubkey) = hex::decode(pubkey_hex) {
+                                if pubkey.len() == 32 {
+                                    parsed_slots.push((index, pubkey.try_into().unwrap()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check if we should adopt this chain
+                if !parsed_rounds.is_empty() && self.cvdf_should_adopt(&parsed_rounds).await {
+                    let their_height = parsed_rounds.last().map(|r| r.round).unwrap_or(0);
+                    let their_weight: u64 = parsed_rounds.iter().map(|r| r.weight() as u64).sum();
+                    info!("Adopting heavier CVDF chain from {} (height {}, weight {})",
+                        peer_id, their_height, their_weight);
+
+                    if self.cvdf_adopt(parsed_rounds).await {
+                        // Chain adopted - now process slots with tiebreaker
+                        // CRITICAL: This is where slot recalculation happens during swarm merge
+                        let mut we_lost_our_slot = false;
+
+                        for (slot_idx, pubkey) in &parsed_slots {
+                            // Register slot in CVDF
+                            self.cvdf_register_slot(*slot_idx, *pubkey).await;
+
+                            // Compute peer_id from pubkey for tiebreaker
+                            let their_peer_id = compute_peer_id_from_bytes(pubkey);
+
+                            // Get slot coord
+                            let coord = spiral3d_to_coord(Spiral3DIndex::new(*slot_idx));
+
+                            // Process through tiebreaker - this handles conflicts
+                            let lost = self.process_slot_claim(
+                                *slot_idx,
+                                their_peer_id,
+                                (coord.q, coord.r, coord.z),
+                                Some(pubkey.to_vec())
+                            ).await;
+
+                            if lost {
+                                we_lost_our_slot = true;
+                            }
+                        }
+
+                        // If we lost our slot, reclaim at next available
+                        if we_lost_our_slot {
+                            let mut target_slot = self.state.read().await.next_available_slot();
+                            info!("Lost slot during chain adoption, reclaiming at slot {}", target_slot);
+
+                            while !self.attempt_slot_via_tgp(target_slot).await {
+                                target_slot += 1;
+                                if target_slot > 1000 {
+                                    error!("Failed to reclaim slot after chain adoption");
+                                    break;
+                                }
+                            }
+
+                            if target_slot <= 1000 {
+                                // Register our new slot
+                                let pubkey = self.state.read().await.signing_key.verifying_key().to_bytes();
+                                self.cvdf_register_slot(target_slot, pubkey).await;
+                                self.cvdf_set_slot(target_slot).await;
+                            }
+                        }
+                    }
+                }
+            }
+            // ==================== END CVDF MESSAGE HANDLERS ====================
             // NOTE: TGP messages are now handled over UDP, not TCP
             // See run_tgp_udp_listener() and handle_tgp_message()
             _ => {
@@ -2363,7 +2691,7 @@ impl MeshService {
             }
         }
 
-        Ok(None)
+        Ok((None, vec![]))
     }
 }
 
@@ -2381,165 +2709,59 @@ mod tests {
         citadel_protocols::KeyPair::from_seed(&secret_bytes).expect("valid 32-byte seed")
     }
 
-    /// Test that the deterministic tiebreaker produces consistent results
+    /// Test SYMMETRIC TGP handshake - both peers use same constructor, roles assigned by key comparison
     #[test]
-    fn test_tiebreaker_deterministic() {
-        let peer_a = "b3b3/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0001";
-        let peer_b = "b3b3/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0002";
+    fn test_tgp_symmetric_handshake() {
+        let kp_a = keypair_from_seed(1);
+        let kp_b = keypair_from_seed(2);
 
-        // Results should be deterministic
-        let a_is_initiator_from_a = MeshService::i_am_tgp_initiator(peer_a, peer_b);
-        let b_is_initiator_from_b = MeshService::i_am_tgp_initiator(peer_b, peer_a);
-
-        // Exactly one should be true (initiator)
-        assert_ne!(a_is_initiator_from_a, b_is_initiator_from_b,
-            "Tiebreaker should assign opposite roles: A={}, B={}",
-            a_is_initiator_from_a, b_is_initiator_from_b);
-
-        // Result should be consistent across calls
-        assert_eq!(a_is_initiator_from_a, MeshService::i_am_tgp_initiator(peer_a, peer_b));
-        assert_eq!(b_is_initiator_from_b, MeshService::i_am_tgp_initiator(peer_b, peer_a));
-    }
-
-    /// Test basic TGP handshake where Alice initiates and Bob responds
-    #[test]
-    fn test_tgp_handshake_alice_bob() {
-        let alice_kp = keypair_from_seed(1);
-        let bob_kp = keypair_from_seed(2);
-
-        let mut alice = PeerCoordinator::new(
-            alice_kp.clone(),
-            bob_kp.public_key().clone(),
-            CoordinatorConfig::initiator()
+        // Both use symmetric constructor - roles determined by public key comparison
+        let mut peer_a = PeerCoordinator::symmetric(
+            kp_a.clone(),
+            kp_b.public_key().clone(),
+            CoordinatorConfig::default()
                 .with_commitment(b"test_slot_0".to_vec())
                 .without_timeout()
                 .with_flood_rate(FloodRateConfig::fast()),
         );
 
-        let mut bob = PeerCoordinator::new(
-            bob_kp,
-            alice_kp.public_key().clone(),
-            CoordinatorConfig::responder()
+        let mut peer_b = PeerCoordinator::symmetric(
+            kp_b,
+            kp_a.public_key().clone(),
+            CoordinatorConfig::default()
+                .with_commitment(b"test_slot_0".to_vec())
                 .without_timeout()
                 .with_flood_rate(FloodRateConfig::fast()),
         );
 
-        alice.set_active(true);
-        bob.set_active(true);
+        peer_a.set_active(true);
+        peer_b.set_active(true);
 
-        // Run handshake
+        // Run handshake - no tiebreaker needed!
         for _ in 0..100 {
-            // Alice polls and sends to Bob
-            if let Ok(Some(messages)) = alice.poll() {
+            if let Ok(Some(messages)) = peer_a.poll() {
                 for msg in messages {
-                    let _ = bob.receive(&msg);
+                    let _ = peer_b.receive(&msg);
                 }
             }
 
-            // Bob polls and sends to Alice
-            if let Ok(Some(messages)) = bob.poll() {
+            if let Ok(Some(messages)) = peer_b.poll() {
                 for msg in messages {
-                    let _ = alice.receive(&msg);
+                    let _ = peer_a.receive(&msg);
                 }
             }
 
-            if alice.is_coordinated() && bob.is_coordinated() {
+            if peer_a.is_coordinated() && peer_b.is_coordinated() {
                 break;
             }
 
             sleep(Duration::from_micros(100));
         }
 
-        assert!(alice.is_coordinated(), "Alice should reach coordination");
-        assert!(bob.is_coordinated(), "Bob should reach coordination");
-        assert!(alice.get_bilateral_receipt().is_some(), "Alice should have bilateral receipt");
-        assert!(bob.get_bilateral_receipt().is_some(), "Bob should have bilateral receipt");
-    }
-
-    /// Test TGP handshake when both parties start as initiators (simultaneous initiation)
-    /// The party with lower hash wins initiator role, other becomes responder
-    #[test]
-    fn test_tgp_simultaneous_initiation_with_tiebreaker() {
-        let alice_kp = keypair_from_seed(1);
-        let bob_kp = keypair_from_seed(2);
-
-        // Both start as initiators (this is what happens in the mesh)
-        let mut alice = PeerCoordinator::new(
-            alice_kp.clone(),
-            bob_kp.public_key().clone(),
-            CoordinatorConfig::initiator()
-                .with_commitment(b"test_slot_0".to_vec())
-                .without_timeout()
-                .with_flood_rate(FloodRateConfig::fast()),
-        );
-
-        let mut bob = PeerCoordinator::new(
-            bob_kp.clone(),
-            alice_kp.public_key().clone(),
-            CoordinatorConfig::initiator()  // Bob also starts as initiator!
-                .with_commitment(b"test_slot_0".to_vec())
-                .without_timeout()
-                .with_flood_rate(FloodRateConfig::fast()),
-        );
-
-        alice.set_active(true);
-        bob.set_active(true);
-
-        // Determine who should be initiator based on hash tiebreaker
-        let alice_id = hex::encode(alice_kp.public_key().as_bytes());
-        let bob_id = hex::encode(bob_kp.public_key().as_bytes());
-        let alice_wins = MeshService::i_am_tgp_initiator(&alice_id, &bob_id);
-
-        // The loser needs to recreate their coordinator as responder
-        // This simulates what the mesh does when it detects both are initiators
-        let (mut winner, mut loser) = if alice_wins {
-            // Alice wins, Bob becomes responder
-            let bob_responder = PeerCoordinator::new(
-                bob_kp.clone(),
-                alice_kp.public_key().clone(),
-                CoordinatorConfig::responder()
-                    .without_timeout()
-                    .with_flood_rate(FloodRateConfig::fast()),
-            );
-            (alice, bob_responder)
-        } else {
-            // Bob wins, Alice becomes responder
-            let alice_responder = PeerCoordinator::new(
-                alice_kp.clone(),
-                bob_kp.public_key().clone(),
-                CoordinatorConfig::responder()
-                    .without_timeout()
-                    .with_flood_rate(FloodRateConfig::fast()),
-            );
-            (bob, alice_responder)
-        };
-
-        winner.set_active(true);
-        loser.set_active(true);
-
-        // Run handshake
-        for _ in 0..100 {
-            if let Ok(Some(messages)) = winner.poll() {
-                for msg in messages {
-                    let _ = loser.receive(&msg);
-                }
-            }
-
-            if let Ok(Some(messages)) = loser.poll() {
-                for msg in messages {
-                    let _ = winner.receive(&msg);
-                }
-            }
-
-            if winner.is_coordinated() && loser.is_coordinated() {
-                break;
-            }
-
-            sleep(Duration::from_micros(100));
-        }
-
-        assert!(winner.is_coordinated(), "Winner (initiator) should reach coordination");
-        assert!(loser.is_coordinated(), "Loser (responder) should reach coordination");
+        assert!(peer_a.is_coordinated(), "Peer A should reach coordination");
+        assert!(peer_b.is_coordinated(), "Peer B should reach coordination");
+        assert!(peer_a.get_bilateral_receipt().is_some(), "Peer A should have bilateral receipt");
+        assert!(peer_b.get_bilateral_receipt().is_some(), "Peer B should have bilateral receipt");
     }
 
     /// Test that SPIRAL slot indices produce the correct coordinates

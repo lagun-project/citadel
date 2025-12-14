@@ -32,6 +32,9 @@ pub struct LensConfig {
 
     /// Admin socket path (for lens-admin CLI)
     pub admin_socket: PathBuf,
+
+    /// Initial admin public key (hex-encoded ed25519 public key)
+    pub admin_public_key: Option<String>,
 }
 
 impl Default for LensConfig {
@@ -47,23 +50,40 @@ impl LensConfig {
             std::env::var("LENS_DATA_DIR").unwrap_or_else(|_| "./lens-data".to_string())
         );
 
-        let api_addr = std::env::var("LENS_API_ADDR")
+        let api_addr = std::env::var("LENS_API_BIND")
             .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
             .parse()
-            .expect("Invalid LENS_API_ADDR");
+            .expect("Invalid LENS_API_BIND");
 
-        let p2p_addr = std::env::var("LENS_P2P_ADDR")
+        let p2p_addr = std::env::var("LENS_P2P_BIND")
             .unwrap_or_else(|_| "0.0.0.0:9000".to_string())
             .parse()
-            .expect("Invalid LENS_P2P_ADDR");
+            .expect("Invalid LENS_P2P_BIND");
 
-        let bootstrap_peers = std::env::var("LENS_BOOTSTRAP_PEERS")
-            .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+        // Parse CITADEL_PEERS - accepts DNS names and portless entries (default 9000)
+        let bootstrap_peers = std::env::var("CITADEL_PEERS")
+            .map(|s| {
+                s.split(',')
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty())
+                    .map(|p| {
+                        // If no port specified, append :9000
+                        if p.contains(':') {
+                            p
+                        } else {
+                            format!("{}:9000", p)
+                        }
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         let admin_socket = std::env::var("LENS_ADMIN_SOCKET")
             .map(PathBuf::from)
             .unwrap_or_else(|_| data_dir.join("admin.sock"));
+
+        let admin_public_key = std::env::var("ADMIN_PUBLIC_KEY").ok()
+            .filter(|s| !s.is_empty());
 
         Self {
             data_dir,
@@ -71,6 +91,7 @@ impl LensConfig {
             p2p_addr,
             bootstrap_peers,
             admin_socket,
+            admin_public_key,
         }
     }
 }
@@ -100,6 +121,12 @@ impl LensNode {
         // Initialize default categories
         storage.init_default_categories()?;
 
+        // Set initial admin public key if provided via env var
+        if let Some(ref admin_key) = config.admin_public_key {
+            storage.set_admin(admin_key, true)?;
+            tracing::info!("Admin public key set: {}", admin_key);
+        }
+
         let state = Arc::new(RwLock::new(LensState {
             storage,
             config: config.clone(),
@@ -126,6 +153,11 @@ impl LensNode {
         tracing::info!("  P2P: {}", self.config.p2p_addr);
         tracing::info!("  Admin: {:?}", self.config.admin_socket);
         tracing::info!("  Data: {:?}", self.config.data_dir);
+        if self.config.bootstrap_peers.is_empty() {
+            tracing::info!("  Peers: none (genesis mode)");
+        } else {
+            tracing::info!("  Peers: {:?}", self.config.bootstrap_peers);
+        }
 
         // Get shared storage for services
         let storage = self.storage().await;

@@ -42,6 +42,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/account/:public_key", get(get_account))
         // Network mesh topology map
         .route("/api/v1/map", get(get_network_map))
+        // Mesh state (slots, peers, TGP sessions)
+        .route("/api/v1/mesh/state", get(get_mesh_state))
         // WebSocket for real-time mesh updates
         .route("/api/v1/ws/mesh", get(ws_mesh_handler))
         .layer(cors)
@@ -410,5 +412,93 @@ async fn get_network_map(
 fn short_peer_id(id: &str) -> String {
     let hash = id.strip_prefix("b3b3/").unwrap_or(id);
     hash.chars().take(12).collect()
+}
+
+// --- Mesh State endpoint ---
+
+#[derive(Debug, Serialize)]
+struct MeshStateResponse {
+    /// Our peer ID
+    self_id: String,
+    /// Our claimed slot (if any)
+    our_slot: Option<SlotInfo>,
+    /// Number of connected peers
+    peer_count: usize,
+    /// All claimed slots in the mesh
+    slot_claims: Vec<SlotInfo>,
+    /// Connected peers
+    peers: Vec<PeerSummary>,
+    /// Active TGP sessions count
+    tgp_sessions: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SlotInfo {
+    index: u64,
+    peer_id: String,
+    coord: CoordInfo,
+}
+
+#[derive(Debug, Serialize)]
+struct CoordInfo {
+    q: i64,
+    r: i64,
+    z: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct PeerSummary {
+    id: String,
+    addr: String,
+    slot: Option<u64>,
+    coordinated: bool,
+    last_seen_ms: u64,
+}
+
+async fn get_mesh_state(
+    State(state): State<AppState>,
+) -> Json<MeshStateResponse> {
+    let state = state.read().await;
+
+    let (self_id, our_slot, peer_count, slot_claims, peers) = if let Some(ref mesh_state) = state.mesh_state {
+        let mesh = mesh_state.read().await;
+
+        let our_slot = mesh.self_slot.as_ref().map(|s| SlotInfo {
+            index: s.index,
+            peer_id: short_peer_id(&mesh.self_id),
+            coord: CoordInfo { q: s.coord.q, r: s.coord.r, z: s.coord.z },
+        });
+
+        let slot_claims: Vec<SlotInfo> = mesh.claimed_slots.iter()
+            .map(|(idx, claim)| SlotInfo {
+                index: *idx,
+                peer_id: short_peer_id(&claim.peer_id),
+                coord: CoordInfo { q: claim.coord.q, r: claim.coord.r, z: claim.coord.z },
+            })
+            .collect();
+
+        let peers: Vec<PeerSummary> = mesh.peers.iter()
+            .map(|(id, peer)| PeerSummary {
+                id: short_peer_id(id),
+                addr: peer.addr.to_string(),
+                slot: peer.slot.as_ref().map(|s| s.index),
+                coordinated: peer.coordinated,
+                last_seen_ms: peer.last_seen.elapsed().as_millis() as u64,
+            })
+            .collect();
+
+        (mesh.self_id.clone(), our_slot, mesh.peers.len(), slot_claims, peers)
+    } else {
+        (String::new(), None, 0, Vec::new(), Vec::new())
+    };
+
+    Json(MeshStateResponse {
+        self_id: short_peer_id(&self_id),
+        our_slot,
+        peer_count,
+        slot_claims,
+        peers,
+        tgp_sessions: 0, // TODO: expose TGP session count
+    })
 }
 
