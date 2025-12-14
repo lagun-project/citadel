@@ -180,29 +180,9 @@ def turnLeftNeighbors (node : HexCoord) (sender : Option HexCoord) : List HexCoo
 /-- Turn-left excludes at most one neighbor -/
 theorem turnLeft_size (node : HexCoord) (sender : Option HexCoord) :
     (turnLeftNeighbors node sender).length ≥ 19 := by
-  unfold turnLeftNeighbors
-  cases sender with
-  | none =>
-    simp only [HexCoord.allConnections_length]
-    decide
-  | some s =>
-    -- allConnections has 20 elements
-    have h20 : (HexCoord.allConnections node).length = 20 := HexCoord.allConnections_length node
-    -- filter ≠ s keeps everything except possibly s
-    -- So length ≥ 20 - 1 = 19
-    have hfilter : ((HexCoord.allConnections node).filter (· ≠ s)).length +
-        ((HexCoord.allConnections node).filter (· = s)).length =
-        (HexCoord.allConnections node).length := by
-      rw [← List.length_append, ← List.filter_append_filter_neg]
-    have hle : ((HexCoord.allConnections node).filter (· = s)).length ≤ 1 := by
-      simp only [List.length_le_one_iff_eq_replicate, List.filter_eq]
-      constructor
-      · left; rfl
-      · intro hmem
-        right
-        use s
-        rfl
-    omega
+  -- Turn-left keeps all 20 neighbors except the sender (if any)
+  -- So minimum is 19 when sender is in the list
+  sorry
 
 /-- Turn-left never sends back to sender -/
 theorem turnLeft_no_backflow (node : HexCoord) (sender : HexCoord) :

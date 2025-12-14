@@ -91,6 +91,35 @@ These are **distinct operating modes**, not a hierarchy or fallback chain:
 * Philosophy: Maximum efficiency, complete mesh awareness
 
 Each mode is self-sufficient. The network chooses ONE mode based on requirements.
+
+## Emergent Omniscience (Capstone Theorem)
+
+The breakthrough: **No node stores the world. The world stores itself, distributed.**
+
+### The Paradox Resolved
+* Each node stores O(k²) = O(400) peers (2-hop neighborhood)
+* Union of all local knowledge = entire mesh
+* The pieces OVERLAP, covering everything
+
+### Propagation Speed (million-node network)
+* Round 0: 1 node knows
+* Round 1: 21 nodes
+* Round 2: 400 nodes
+* Round 3: 8,000 nodes
+* Round 4: 150,000 nodes
+* Round 5: 1,000,000 nodes (SATURATED)
+
+**5 rounds to global knowledge. Not O(diameter). EXPONENTIAL.**
+
+### The Beautiful Recursion
+SPORE syncs data. PeerInfo is data. Therefore SPORE syncs knowledge of the network itself.
+
+The network is:
+* **Self-describing** - PeerInfo describes the mesh
+* **Self-discovering** - SPORE propagates new nodes
+* **Self-healing** - Departures propagate the same way
+
+*e cinere surgemus*
 -/
 
 import CitadelProofs.Topology
@@ -99,3 +128,4 @@ import CitadelProofs.Convergence
 import CitadelProofs.Broadcast
 import CitadelProofs.Spore
 import CitadelProofs.TwoHopKnowledge
+import CitadelProofs.EmergentOmniscience
