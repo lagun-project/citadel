@@ -1,0 +1,19 @@
+[package]
+name = "citadel-transfer"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "High-performance UDP transport and streaming for Citadel mesh networks"
+repository = "https://github.com/rifflabs/citadel"
+
+[dependencies]
+tokio = { version = "1", features = ["net", "sync", "rt", "macros", "time"] }
+bytes = { version = "1", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+anyhow = "1"
+futures = "0.3"
+socket2 = "0.5"
+
+[dev-dependencies]
+tokio-test = "0.4"

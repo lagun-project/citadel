@@ -7,6 +7,7 @@ members = [
     "crates/citadel-crdt",
     "crates/citadel-consensus",
     "crates/citadel-protocols",
+    "crates/citadel-transfer",
     "crates/citadel-lens",
     "crates/citadel-vis",
     "crates/citadel-wgpu",
@@ -58,3 +59,4 @@ citadel-protocols = { path = "crates/citadel-protocols" }
 citadel-utils = { path = "crates/citadel-utils" }
 citadel-logging = { path = "crates/citadel-logging" }
 citadel-metrics = { path = "crates/citadel-metrics" }
+citadel-transfer = { path = "crates/citadel-transfer" }
